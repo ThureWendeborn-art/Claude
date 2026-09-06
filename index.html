@@ -122,7 +122,8 @@ h2,h3{ font-weight:600; }
   background: var(--accent-dim);
   border-color: rgba(59,130,246,0.35);
 }
-.nav-item[data-view="dashboard"]{
+.nav-item[data-view="dashboard"],
+.nav-item[data-view="leaderboard"]{
   flex-direction: row;
   align-items:center;
   gap:10px;
@@ -144,6 +145,33 @@ h2,h3{ font-weight:600; }
   flex-direction:column;
   gap:10px;
 }
+
+.user-badge{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight:600;
+}
+.user-icon{ font-size:14px; }
+.user-name{
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.logout-btn{
+  font-size: 15px;
+  color: var(--text-faint);
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: color .15s ease, background .15s ease;
+}
+.logout-btn:hover{ color: var(--red); background: var(--red-dim); }
 .reset-btn{
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -632,6 +660,115 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
   .chart-wrap{ height: 300px; }
   .balance-label{ display:none; }
 }
+
+/* ===== AUTH OVERLAY (Login / Registrierung) ===== */
+#authOverlay{ z-index: 300; }
+#authOverlay.hidden{ display:none; }
+.auth-modal{
+  max-width: 380px;
+  width: 92%;
+}
+.auth-logo{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  margin-bottom: 18px;
+}
+.auth-logo .logo-icon{ font-size:22px; }
+.auth-logo .logo-text{ font-weight:700; font-size:19px; }
+
+.auth-tabs{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+}
+.auth-tab{
+  padding: 9px 0;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight:700;
+  color: var(--text-dim);
+  transition: all .15s ease;
+}
+.auth-tab.active{
+  background: var(--accent);
+  color: #fff;
+}
+
+.auth-error{
+  background: var(--red-dim);
+  border: 1px solid rgba(239,68,68,0.4);
+  color: var(--red);
+  font-size: 12.5px;
+  font-weight:600;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.auth-error.hidden{ display:none; }
+
+#authOverlay input{
+  width:100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 11px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight:600;
+  margin-bottom: 4px;
+}
+#authOverlay input:focus{ border-color: var(--accent); }
+
+.auth-note{
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height:1.5;
+  margin-top: 14px;
+  text-align:center;
+}
+
+/* ===== LEADERBOARD ===== */
+.leaderboard-note{
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height:1.6;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+.leaderboard-note code{
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+tr.me-row td{
+  background: var(--accent-dim);
+}
+.you-badge{
+  display:inline-block;
+  font-size: 10px;
+  font-weight:700;
+  color: var(--accent);
+  background: rgba(59,130,246,0.15);
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ===== RESET-EINTRAG IN HISTORIE ===== */
+tr.reset-row td{
+  font-style: italic;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.02);
+}
 </style>
 </head>
 <body>
@@ -651,6 +788,11 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
     </nav>
 
     <div class="sidebar-footer">
+      <div class="user-badge">
+        <span class="user-icon">👤</span>
+        <span class="user-name" id="sidebarUsername">–</span>
+        <button class="logout-btn" id="logoutBtn" title="Abmelden">⏻</button>
+      </div>
       <button class="reset-btn" id="resetBtn">🔄 Reset Account</button>
       <div class="disclaimer">⚠️ Simulation – kein echtes Geld</div>
     </div>
@@ -734,6 +876,29 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
         </div>
       </section>
 
+      <!-- LEADERBOARD VIEW -->
+      <section id="view-leaderboard" class="view">
+        <h2 class="view-title">🏆 Rangliste</h2>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rang</th><th>Spieler</th><th>Gesamtguthaben</th>
+                  <th>Gewinn/Verlust (Lifetime)</th><th>Trades</th><th>Dabei seit</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboardBody"></tbody>
+            </table>
+          </div>
+          <p class="leaderboard-note">
+            ℹ️ Diese Rangliste läuft komplett ohne Server – sie zeigt nur Konten, die
+            auf <strong>diesem Gerät bzw. Browser</strong> registriert wurden, da lokal
+            in <code>localStorage</code> gespeichert wird. Sie ist nicht geräteübergreifend.
+          </p>
+        </div>
+      </section>
+
       <!-- MARKET / TRADING VIEW -->
       <section id="view-market" class="view">
         <div class="market-header">
@@ -813,12 +978,44 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
   </main>
 </div>
 
+<!-- AUTH OVERLAY (Login / Registrierung) -->
+<div class="modal-overlay" id="authOverlay">
+  <div class="modal auth-modal">
+    <div class="auth-logo">
+      <span class="logo-icon">📈</span>
+      <span class="logo-text">TradeSim</span>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Anmelden</button>
+      <button class="auth-tab" data-tab="register">Registrieren</button>
+    </div>
+
+    <div id="authError" class="auth-error hidden"></div>
+
+    <label class="field-label">Benutzername</label>
+    <input type="text" id="authUsername" maxlength="20" autocomplete="username" placeholder="z. B. maxmustermann" />
+
+    <label class="field-label">Passwort</label>
+    <input type="password" id="authPassword" autocomplete="current-password" placeholder="beliebig" />
+
+    <button class="btn-primary" id="authSubmitBtn">Anmelden</button>
+
+    <p class="auth-note">
+      Lokales Demo-Konto nur für dieses Gerät/diesen Browser. Keine echte
+      Kontosicherheit, keine Passwort-Wiederherstellung, keine Übertragung an
+      einen Server – alles bleibt in deinem Browser gespeichert.
+    </p>
+  </div>
+</div>
+
 <!-- RESET MODAL -->
 <div class="modal-overlay hidden" id="resetModal">
   <div class="modal">
     <h3>Account zurücksetzen?</h3>
-    <p>Dein gesamter Spielstand (Guthaben, offene Positionen, Historie und Kursverläufe) wird gelöscht und auf
-       <strong>100,00 €</strong> zurückgesetzt. Diese Aktion kann nicht rückgängig gemacht werden.</p>
+    <p>Dein Guthaben und deine offenen Positionen werden auf <strong>100,00 €</strong>
+       zurückgesetzt. Deine Trade-Historie bleibt erhalten – es wird lediglich ein
+       Reset-Eintrag hinzugefügt. Diese Aktion kann nicht rückgängig gemacht werden.</p>
     <div class="modal-actions">
       <button class="btn-secondary" id="cancelResetBtn">Abbrechen</button>
       <button class="btn-danger" id="confirmResetBtn">Zurücksetzen</button>
@@ -832,14 +1029,25 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
 "use strict";
 
 /* =========================================================================
-   TRADING SIMULATOR – KOMPLETTE LOGIK
+   TRADING SIMULATOR – KOMPLETTE LOGIK (v2: Login + Rangliste)
    Reines Frontend, keine Backend-Verbindung, keine echten Kurse/Broker.
    Alle Kurse werden clientseitig simuliert. Speicherung via localStorage.
+
+   WICHTIGER HINWEIS ZUR ARCHITEKTUR:
+   Diese App läuft komplett ohne Server. "Accounts" und die Rangliste sind
+   daher NICHT geräteübergreifend – sie existieren nur in localStorage
+   dieses einen Browsers/Geräts. Passwörter werden nur simpel gehasht
+   (kein echtes Sicherheitskonzept), das reicht für eine lokale Demo mit
+   mehreren Spielern auf demselben Gerät, aber nicht für echte Accounts.
    ========================================================================= */
 
 /* ------------------------- KONFIGURATION ------------------------- */
 
-const STORAGE_KEY = "tradesim_state_v1";
+const STORAGE_PROFILES = "tradesim_profiles_v2";
+const STORAGE_SESSION  = "tradesim_session_v2";
+const STORAGE_MARKETS  = "tradesim_markets_v2";
+const STORAGE_OLD_V1   = "tradesim_state_v1"; // für Migration aus der Vorversion
+
 const STARTING_CASH = 100;
 
 const MARKETS = [
@@ -860,18 +1068,22 @@ const TICKS_PER_CANDLE = 4;       // 4 Ticks = 1 simulierte 1-Minuten-Kerze
 const SEED_CANDLES = 720;         // Anfangshistorie: 720 Minuten = 12 Stunden
 const MAX_CANDLES = 1440;         // maximal gespeicherte 1M-Kerzen (= 1 simulierter Tag)
 const CHART_CANDLE_COUNT = 110;   // sichtbare Kerzen im Chart
-const SAVE_EVERY_N_TICKS = 8;     // Auto-Save alle ~8 Sekunden
+const SAVE_EVERY_N_TICKS = 8;     // Auto-Save der Kursdaten alle ~8 Sekunden
 
 const TF_GROUP = { "1m": 1, "5m": 5, "15m": 15, "1h": 60, "1d": 1440 };
 
 /* ------------------------- GLOBALER STATE ------------------------- */
 
-let state = null;                     // { cash, positions[], history[], markets{} }
-let currentView = "dashboard";        // "dashboard" | "market"
+let markets = {};                     // { marketId: marketData } – GETEILT für alle Spieler
+let profiles = {};                    // { username(normalisiert): profileObj }
+let session = null;                   // normalisierter Username des eingeloggten Spielers, oder null
+
+let currentView = "dashboard";        // "dashboard" | "leaderboard" | "market"
 let currentMarketId = MARKETS[0].id;
 let currentTimeframe = "15m";
 let orderSide = "long";
 let orderLeverage = 1;
+let authMode = "login";               // "login" | "register"
 let tickCounter = 0;
 let tickHandle = null;
 
@@ -884,7 +1096,6 @@ function uid() {
 }
 
 function randNorm() {
-  // Box-Muller-Transformation für annähernd normalverteilte Zufallswerte
   let u = 0, v = 0;
   while (u === 0) u = Math.random();
   while (v === 0) v = Math.random();
@@ -911,9 +1122,34 @@ function fmtDateTime(ts) {
   return new Date(ts).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtDate(ts) {
+  return new Date(ts).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 function marketDef(id) { return MARKETS.find(m => m.id === id); }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* einfacher, NICHT-kryptografischer Hash – nur zur Trennung mehrerer
+   lokaler Demo-Konten, keine echte Passwortsicherheit */
+function hashPassword(pw) {
+  let h = 5381;
+  const s = String(pw);
+  for (let i = 0; i < s.length; i++) {
+    h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
+function normalizeUsername(u) {
+  return String(u || "").trim().toLowerCase();
+}
+
 /* ========================= KURS-SIMULATIONS-ENGINE ========================= */
+/* Ein einziger geteilter Markt für ALLE Spieler – läuft unabhängig davon,
+   wer gerade eingeloggt ist. */
 
 function priceStep(m) {
   const shock = randNorm();
@@ -1010,51 +1246,180 @@ function marketChangePct(m) {
   return (price - refPrice) / refPrice * 100;
 }
 
-/* ============================ STATE / PERSISTENZ ============================ */
+/* ============================ PERSISTENZ ============================ */
 
-function freshState() {
-  const s = { cash: STARTING_CASH, positions: [], history: [] , markets: {} };
-  MARKETS.forEach(def => { s.markets[def.id] = initMarket(def); });
-  return s;
+function freshMarkets() {
+  const m = {};
+  MARKETS.forEach(def => { m[def.id] = initMarket(def); });
+  return m;
 }
 
-function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+function loadMarkets() {
+  const raw = localStorage.getItem(STORAGE_MARKETS);
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") throw new Error("invalid");
-      state = parsed;
-      if (typeof state.cash !== "number" || !isFinite(state.cash)) state.cash = STARTING_CASH;
-      if (!Array.isArray(state.positions)) state.positions = [];
-      if (!Array.isArray(state.history)) state.history = [];
-      if (!state.markets || typeof state.markets !== "object") state.markets = {};
+      markets = parsed && typeof parsed === "object" ? parsed : {};
       MARKETS.forEach(def => {
-        const m = state.markets[def.id];
-        if (!m || !Array.isArray(m.candles) || !m.cur) {
-          state.markets[def.id] = initMarket(def);
-        }
+        const m = markets[def.id];
+        if (!m || !Array.isArray(m.candles) || !m.cur) markets[def.id] = initMarket(def);
       });
       return;
     } catch (e) {
-      console.warn("Gespeicherter Spielstand beschädigt, wird zurückgesetzt.", e);
+      console.warn("Marktdaten beschädigt, werden neu erzeugt.", e);
     }
   }
-  state = freshState();
+  markets = freshMarkets();
 }
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn("Speichern des Spielstands fehlgeschlagen:", e);
+function saveMarkets() {
+  try { localStorage.setItem(STORAGE_MARKETS, JSON.stringify(markets)); }
+  catch (e) { console.warn("Speichern der Marktdaten fehlgeschlagen:", e); }
+}
+
+function loadProfiles() {
+  const raw = localStorage.getItem(STORAGE_PROFILES);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      profiles = parsed && typeof parsed === "object" ? parsed : {};
+    } catch (e) {
+      console.warn("Profildaten beschädigt, werden zurückgesetzt.", e);
+      profiles = {};
+    }
+  } else {
+    profiles = {};
   }
+  Object.values(profiles).forEach(p => {
+    if (typeof p.cash !== "number" || !isFinite(p.cash)) p.cash = STARTING_CASH;
+    if (!Array.isArray(p.positions)) p.positions = [];
+    if (!Array.isArray(p.history)) p.history = [];
+    if (!p.displayName) p.displayName = p.username;
+  });
+}
+
+function saveProfiles() {
+  try { localStorage.setItem(STORAGE_PROFILES, JSON.stringify(profiles)); }
+  catch (e) { console.warn("Speichern der Profile fehlgeschlagen:", e); }
+}
+
+function loadSession() {
+  const raw = localStorage.getItem(STORAGE_SESSION);
+  session = raw && profiles[raw] ? raw : null;
+}
+
+function saveSession() {
+  if (session) localStorage.setItem(STORAGE_SESSION, session);
+  else localStorage.removeItem(STORAGE_SESSION);
+}
+
+/* Best-effort-Migration aus der Vorversion ohne Login (falls vorhanden) */
+function migrateOldStateIfNeeded() {
+  if (Object.keys(profiles).length > 0) return;
+  const raw = localStorage.getItem(STORAGE_OLD_V1);
+  if (!raw) return;
+  try {
+    const old = JSON.parse(raw);
+    const uname = "spieler1";
+    profiles[uname] = {
+      username: uname,
+      displayName: "Spieler1",
+      passwordHash: hashPassword(""),
+      createdAt: Date.now(),
+      cash: typeof old.cash === "number" && isFinite(old.cash) ? old.cash : STARTING_CASH,
+      positions: Array.isArray(old.positions) ? old.positions : [],
+      history: Array.isArray(old.history) ? old.history.map(h => ({ ...h, type: "trade" })) : [],
+    };
+    if (old.markets && typeof old.markets === "object") {
+      markets = old.markets;
+      MARKETS.forEach(def => { if (!markets[def.id]) markets[def.id] = initMarket(def); });
+    }
+    saveProfiles();
+    saveMarkets();
+  } catch (e) {
+    console.warn("Migration der alten Daten fehlgeschlagen (nicht kritisch):", e);
+  }
+}
+
+/* ============================== AUTH ============================== */
+
+function activeProfile() { return session ? profiles[session] : null; }
+
+function authError(msg) {
+  const el = document.getElementById("authError");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+function clearAuthError() {
+  document.getElementById("authError").classList.add("hidden");
+}
+
+function showAuthOverlay() {
+  document.getElementById("authOverlay").classList.remove("hidden");
+}
+function hideAuthOverlay() {
+  document.getElementById("authOverlay").classList.add("hidden");
+}
+
+function handleRegister(usernameRaw, password) {
+  const norm = normalizeUsername(usernameRaw);
+  if (norm.length < 2) { authError("Benutzername muss mindestens 2 Zeichen haben."); return; }
+  if (norm.length > 20) { authError("Benutzername darf höchstens 20 Zeichen haben."); return; }
+  if (profiles[norm]) { authError("Dieser Benutzername ist bereits vergeben."); return; }
+
+  profiles[norm] = {
+    username: norm,
+    displayName: usernameRaw.trim(),
+    passwordHash: hashPassword(password),
+    createdAt: Date.now(),
+    cash: STARTING_CASH,
+    positions: [],
+    history: [],
+  };
+  saveProfiles();
+  session = norm;
+  saveSession();
+  afterLogin();
+}
+
+function handleLogin(usernameRaw, password) {
+  const norm = normalizeUsername(usernameRaw);
+  const p = profiles[norm];
+  if (!p) { authError("Kein Konto mit diesem Benutzernamen gefunden."); return; }
+  if (p.passwordHash !== hashPassword(password)) { authError("Falsches Passwort."); return; }
+  session = norm;
+  saveSession();
+  afterLogin();
+}
+
+function handleLogout() {
+  session = null;
+  saveSession();
+  document.getElementById("authUsername").value = "";
+  document.getElementById("authPassword").value = "";
+  clearAuthError();
+  showAuthOverlay();
+}
+
+function afterLogin() {
+  hideAuthOverlay();
+  clearAuthError();
+  document.getElementById("authPassword").value = "";
+  updateSidebarUser();
+  showView("dashboard");
+  renderLivePrices();
+}
+
+function updateSidebarUser() {
+  const p = activeProfile();
+  document.getElementById("sidebarUsername").textContent = p ? p.displayName : "–";
 }
 
 /* ============================ TRADING-LOGIK ============================ */
 
 function positionPnl(pos) {
-  const m = state.markets[pos.marketId];
+  const m = markets[pos.marketId];
+  if (!m) return 0;
   const price = m.cur.c;
   const pctMove = (price - pos.entryPrice) / pos.entryPrice * (pos.side === "long" ? 1 : -1);
   return pos.size * pctMove;
@@ -1066,12 +1431,28 @@ function positionPnlPct(pos) {
 }
 
 function computeLiqPrice(entryPrice, side, leverage) {
-  if (leverage <= 1) return null; // keine Liquidation ohne Hebel
+  if (leverage <= 1) return null;
   const liqDist = (1 / leverage) * LIQ_BUFFER;
   return side === "long" ? entryPrice * (1 - liqDist) : entryPrice * (1 + liqDist);
 }
 
+function computeProfileInvested(p) {
+  return p.positions.reduce((s, x) => s + x.margin, 0);
+}
+function computeProfileUnrealized(p) {
+  return p.positions.reduce((s, x) => s + positionPnl(x), 0);
+}
+function computeProfileTotal(p) {
+  return p.cash + computeProfileInvested(p) + computeProfileUnrealized(p);
+}
+function computeLifetimePnl(p) {
+  return p.history.reduce((s, h) => (h.type === "trade" ? s + h.pnl : s), 0);
+}
+
 function handleOpenPosition() {
+  const profile = activeProfile();
+  if (!profile) return;
+
   const amountInput = document.getElementById("amountInput");
   const amount = parseFloat(amountInput.value);
   const def = marketDef(currentMarketId);
@@ -1080,12 +1461,12 @@ function handleOpenPosition() {
     toast("Bitte einen gültigen Betrag eingeben.", "error");
     return;
   }
-  if (amount > state.cash + 0.0001) {
+  if (amount > profile.cash + 0.0001) {
     toast("Nicht genügend verfügbares Guthaben.", "error");
     return;
   }
 
-  const m = state.markets[currentMarketId];
+  const m = markets[currentMarketId];
   const entryPrice = m.cur.c;
   const leverage = orderLeverage;
   const side = orderSide;
@@ -1104,9 +1485,9 @@ function handleOpenPosition() {
     openTime: Date.now(),
   };
 
-  state.cash -= amount;
-  state.positions.push(pos);
-  saveState();
+  profile.cash -= amount;
+  profile.positions.push(pos);
+  saveProfiles();
 
   amountInput.value = "";
   toast(`Position eröffnet: ${side === "long" ? "Long" : "Short"} ${def.name} · ${leverage}x`, "success");
@@ -1114,21 +1495,22 @@ function handleOpenPosition() {
   rerenderAll();
 }
 
-function closePosition(id, reason) {
-  const idx = state.positions.findIndex(p => p.id === id);
+function closePositionForProfile(profile, id, reason) {
+  const idx = profile.positions.findIndex(p => p.id === id);
   if (idx < 0) return;
-  const pos = state.positions[idx];
-  const m = state.markets[pos.marketId];
+  const pos = profile.positions[idx];
+  const m = markets[pos.marketId];
   const exitPrice = m.cur.c;
   const pctMove = (exitPrice - pos.entryPrice) / pos.entryPrice * (pos.side === "long" ? 1 : -1);
   let pnl = pos.size * pctMove;
-  pnl = Math.max(pnl, -pos.margin); // Verlust ist auf den investierten Betrag begrenzt
+  pnl = Math.max(pnl, -pos.margin);
 
-  state.cash += pos.margin + pnl;
-  state.positions.splice(idx, 1);
+  profile.cash += pos.margin + pnl;
+  profile.positions.splice(idx, 1);
 
-  state.history.unshift({
+  profile.history.unshift({
     id: pos.id,
+    type: "trade",
     marketId: pos.marketId,
     side: pos.side,
     entryPrice: pos.entryPrice,
@@ -1141,31 +1523,35 @@ function closePosition(id, reason) {
     closeTime: Date.now(),
     reason: reason || "manual",
   });
-  if (state.history.length > 300) state.history.length = 300;
+  if (profile.history.length > 300) profile.history.length = 300;
+  saveProfiles();
 
-  saveState();
-
-  const def = marketDef(pos.marketId);
-  if (reason === "liquidation") {
-    toast(`⚠️ Position liquidiert: ${def.name} (${pos.side === "long" ? "Long" : "Short"} ${pos.leverage}x) – Verlust ${fmtMoney(pnl)}`, "error");
-  } else {
-    toast(`Position geschlossen: ${def.name} · ${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}`, pnl >= 0 ? "success" : "error");
+  if (session === profile.username) {
+    const def = marketDef(pos.marketId);
+    if (reason === "liquidation") {
+      toast(`⚠️ Position liquidiert: ${def.name} (${pos.side === "long" ? "Long" : "Short"} ${pos.leverage}x) – Verlust ${fmtMoney(pnl)}`, "error");
+    } else {
+      toast(`Position geschlossen: ${def.name} · ${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}`, pnl >= 0 ? "success" : "error");
+    }
+    rerenderAll();
   }
-
-  rerenderAll();
 }
 
-function checkLiquidations() {
-  const snapshot = state.positions.slice();
-  for (const pos of snapshot) {
-    if (pos.liqPrice == null) continue;
-    const price = state.markets[pos.marketId].cur.c;
-    if (pos.side === "long" && price <= pos.liqPrice) {
-      closePosition(pos.id, "liquidation");
-    } else if (pos.side === "short" && price >= pos.liqPrice) {
-      closePosition(pos.id, "liquidation");
+function checkLiquidationsAllProfiles() {
+  Object.values(profiles).forEach(profile => {
+    const snapshot = profile.positions.slice();
+    for (const pos of snapshot) {
+      if (pos.liqPrice == null) continue;
+      const m = markets[pos.marketId];
+      if (!m) continue;
+      const price = m.cur.c;
+      if (pos.side === "long" && price <= pos.liqPrice) {
+        closePositionForProfile(profile, pos.id, "liquidation");
+      } else if (pos.side === "short" && price >= pos.liqPrice) {
+        closePositionForProfile(profile, pos.id, "liquidation");
+      }
     }
-  }
+  });
 }
 
 /* ============================ CHART RENDERING ============================ */
@@ -1209,7 +1595,6 @@ function drawChart(canvas, candles, decimals, positions) {
   const slotW = plotW / n;
   const bodyW = Math.max(1.5, slotW * 0.62);
 
-  // Gitterlinien + Preis-Labels
   ctx.strokeStyle = "rgba(255,255,255,0.055)";
   ctx.fillStyle = "#8b93a8";
   ctx.font = "11px -apple-system, Segoe UI, sans-serif";
@@ -1225,7 +1610,6 @@ function drawChart(canvas, candles, decimals, positions) {
     ctx.fillText(fmtPrice(p, decimals), W - padding.right + 6, y);
   }
 
-  // Candles
   for (let i = 0; i < n; i++) {
     const c = candles[i];
     const x = padding.left + i * slotW + slotW / 2;
@@ -1246,7 +1630,6 @@ function drawChart(canvas, candles, decimals, positions) {
     ctx.fillRect(x - bodyW / 2, top, bodyW, h);
   }
 
-  // Positions-Linien (Einstieg / Liquidation)
   if (positions && positions.length) {
     for (const p of positions) {
       drawDashedHLine(ctx, priceToY(p.entryPrice), W, padding, "#3b82f6");
@@ -1254,7 +1637,6 @@ function drawChart(canvas, candles, decimals, positions) {
     }
   }
 
-  // aktuelle Preislinie
   const last = candles[n - 1].c;
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.4)";
@@ -1288,7 +1670,7 @@ function renderPositionsTable(tbody, positions, showMarket) {
   }
   tbody.innerHTML = positions.map(pos => {
     const def = marketDef(pos.marketId);
-    const m = state.markets[pos.marketId];
+    const m = markets[pos.marketId];
     const pnl = positionPnl(pos);
     const pnlPct = positionPnlPct(pos);
     const pnlClass = pnl >= 0 ? "text-green" : "text-red";
@@ -1310,10 +1692,13 @@ function renderPositionsTable(tbody, positions, showMarket) {
 
 function renderHistoryTable(tbody, history) {
   if (!history.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Noch keine abgeschlossenen Trades</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Noch keine Einträge</td></tr>`;
     return;
   }
   tbody.innerHTML = history.map(h => {
+    if (h.type === "reset") {
+      return `<tr class="reset-row"><td>${fmtDateTime(h.closeTime)}</td><td colspan="7">🔄 ${escapeHtml(h.note)}</td></tr>`;
+    }
     const def = marketDef(h.marketId);
     const pnlClass = h.pnl >= 0 ? "text-green" : "text-red";
     const dirClass = h.side === "long" ? "dir-long" : "dir-short";
@@ -1332,29 +1717,61 @@ function renderHistoryTable(tbody, history) {
 }
 
 function renderDashboard() {
-  const invested = state.positions.reduce((s, p) => s + p.margin, 0);
-  const upnl = state.positions.reduce((s, p) => s + positionPnl(p), 0);
-  const total = state.cash + invested + upnl;
+  const profile = activeProfile();
+  if (!profile) return;
+
+  const invested = computeProfileInvested(profile);
+  const upnl = computeProfileUnrealized(profile);
+  const total = profile.cash + invested + upnl;
 
   document.getElementById("dashTotal").textContent = fmtMoney(total);
-  document.getElementById("dashAvailable").textContent = fmtMoney(state.cash);
+  document.getElementById("dashAvailable").textContent = fmtMoney(profile.cash);
   document.getElementById("dashInvested").textContent = fmtMoney(invested);
 
   const upnlEl = document.getElementById("dashUpnl");
   upnlEl.textContent = (upnl >= 0 ? "+" : "") + fmtMoney(upnl);
   upnlEl.className = "stat-value " + (upnl >= 0 ? "text-green" : "text-red");
 
-  document.getElementById("dashOpenCount").textContent = state.positions.length;
+  document.getElementById("dashOpenCount").textContent = profile.positions.length;
 
-  renderPositionsTable(document.getElementById("positionsTableBody"), state.positions, true);
-  renderHistoryTable(document.getElementById("historyTableBody"), state.history);
+  renderPositionsTable(document.getElementById("positionsTableBody"), profile.positions, true);
+  renderHistoryTable(document.getElementById("historyTableBody"), profile.history);
 
   document.getElementById("topBalance").textContent = fmtMoney(total);
 }
 
+function renderLeaderboard() {
+  const rows = Object.values(profiles).map(p => ({
+    p,
+    total: computeProfileTotal(p),
+    lifetime: computeLifetimePnl(p),
+    trades: p.history.filter(h => h.type === "trade").length,
+  })).sort((a, b) => b.total - a.total);
+
+  const tbody = document.getElementById("leaderboardBody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Noch keine Spieler registriert</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map((r, i) => {
+    const isMe = session === r.p.username;
+    const rankLabel = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : String(i + 1);
+    const lifetimeClass = r.lifetime >= 0 ? "text-green" : "text-red";
+    return `<tr class="${isMe ? "me-row" : ""}">
+      <td>${rankLabel}</td>
+      <td>${escapeHtml(r.p.displayName)}${isMe ? '<span class="you-badge">Du</span>' : ""}</td>
+      <td>${fmtMoney(r.total)}</td>
+      <td class="${lifetimeClass}">${r.lifetime >= 0 ? "+" : ""}${fmtMoney(r.lifetime)}</td>
+      <td>${r.trades}</td>
+      <td>${fmtDate(r.p.createdAt)}</td>
+    </tr>`;
+  }).join("");
+}
+
 function renderLivePrices() {
   MARKETS.forEach(def => {
-    const m = state.markets[def.id];
+    const m = markets[def.id];
     const priceEl = document.querySelector(`[data-price-for="${def.id}"]`);
     const changeEl = document.querySelector(`[data-change-for="${def.id}"]`);
     if (!priceEl || !changeEl) return;
@@ -1364,15 +1781,13 @@ function renderLivePrices() {
     changeEl.className = "nav-change " + (changePct >= 0 ? "text-green" : "text-red");
   });
 
-  // Topbar-Guthaben immer aktuell halten, auch außerhalb des Dashboards
-  const invested = state.positions.reduce((s, p) => s + p.margin, 0);
-  const upnl = state.positions.reduce((s, p) => s + positionPnl(p), 0);
-  document.getElementById("topBalance").textContent = fmtMoney(state.cash + invested + upnl);
+  const profile = activeProfile();
+  document.getElementById("topBalance").textContent = profile ? fmtMoney(computeProfileTotal(profile)) : "–";
 }
 
 function updateOrderPreview() {
   const def = marketDef(currentMarketId);
-  const m = state.markets[currentMarketId];
+  const m = markets[currentMarketId];
   const price = m.cur.c;
   const amount = parseFloat(document.getElementById("amountInput").value) || 0;
   const size = amount * orderLeverage;
@@ -1401,7 +1816,6 @@ function renderMarketStatic() {
   document.getElementById("mktNamePositions").textContent = def.name;
   document.getElementById("topbarTitle").textContent = def.name;
 
-  // Order-Panel auf Standard zurücksetzen
   document.getElementById("amountInput").value = "";
   orderSide = "long";
   orderLeverage = 1;
@@ -1411,8 +1825,9 @@ function renderMarketStatic() {
 }
 
 function updateMarketDynamic() {
+  const profile = activeProfile();
   const def = marketDef(currentMarketId);
-  const m = state.markets[currentMarketId];
+  const m = markets[currentMarketId];
   const price = m.cur.c;
 
   document.getElementById("mktPrice").textContent = fmtPrice(price, def.decimals);
@@ -1424,7 +1839,7 @@ function updateMarketDynamic() {
   const groupSize = TF_GROUP[currentTimeframe] || 1;
   const full = m.candles.concat([m.cur]);
   const agg = aggregate(full, groupSize).slice(-CHART_CANDLE_COUNT);
-  const positionsForMarket = state.positions.filter(p => p.marketId === currentMarketId);
+  const positionsForMarket = profile ? profile.positions.filter(p => p.marketId === currentMarketId) : [];
 
   drawChart(document.getElementById("chartCanvas"), agg, def.decimals, positionsForMarket);
   renderPositionsTable(document.getElementById("mktPositionsBody"), positionsForMarket, false);
@@ -1433,11 +1848,9 @@ function updateMarketDynamic() {
 
 function rerenderAll() {
   renderLivePrices();
-  if (currentView === "dashboard") {
-    renderDashboard();
-  } else {
-    updateMarketDynamic();
-  }
+  if (currentView === "dashboard") renderDashboard();
+  else if (currentView === "leaderboard") renderLeaderboard();
+  else if (currentView === "market") updateMarketDynamic();
 }
 
 /* ============================== NAVIGATION ============================== */
@@ -1446,6 +1859,9 @@ function buildSidebarNav() {
   const navList = document.getElementById("navList");
   let html = `<button class="nav-item active" data-view="dashboard">
       <span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span>
+    </button>
+    <button class="nav-item" data-view="leaderboard">
+      <span class="nav-icon">🏆</span><span class="nav-label">Rangliste</span>
     </button>
     <div class="nav-section-title">Märkte</div>`;
 
@@ -1469,18 +1885,24 @@ function buildSidebarNav() {
 }
 
 function showView(view) {
+  if (!activeProfile()) return; // ohne Login keine Ansicht wechseln
+
   document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
 
   if (view === "dashboard") {
     currentView = "dashboard";
     document.getElementById("view-dashboard").classList.add("active");
-    document.getElementById("view-market").classList.remove("active");
     document.getElementById("topbarTitle").textContent = "Dashboard";
     renderDashboard();
+  } else if (view === "leaderboard") {
+    currentView = "leaderboard";
+    document.getElementById("view-leaderboard").classList.add("active");
+    document.getElementById("topbarTitle").textContent = "Rangliste";
+    renderLeaderboard();
   } else {
     currentView = "market";
     currentMarketId = view;
-    document.getElementById("view-dashboard").classList.remove("active");
     document.getElementById("view-market").classList.add("active");
     renderMarketStatic();
     updateMarketDynamic();
@@ -1519,37 +1941,73 @@ function showResetModal() { document.getElementById("resetModal").classList.remo
 function hideResetModal() { document.getElementById("resetModal").classList.add("hidden"); }
 
 function performReset() {
-  localStorage.removeItem(STORAGE_KEY);
-  state = freshState();
-  saveState();
-  currentMarketId = MARKETS[0].id;
-  currentTimeframe = "15m";
+  const profile = activeProfile();
+  if (!profile) return;
+
+  profile.history.unshift({
+    type: "reset",
+    closeTime: Date.now(),
+    note: `Konto zurückgesetzt auf ${fmtMoney(STARTING_CASH)}`,
+  });
+  if (profile.history.length > 300) profile.history.length = 300;
+
+  profile.cash = STARTING_CASH;
+  profile.positions = [];
+  saveProfiles();
+
   hideResetModal();
-  showView("dashboard");
-  renderLivePrices();
-  toast("Account wurde zurückgesetzt – Startguthaben: 100,00 €", "success");
+  rerenderAll();
+  toast(`Konto zurückgesetzt – Startguthaben: ${fmtMoney(STARTING_CASH)}`, "success");
 }
 
 /* ============================== HAUPT-TICK ============================== */
 
 function tick() {
-  MARKETS.forEach(def => microTick(state.markets[def.id]));
-  checkLiquidations();
+  MARKETS.forEach(def => microTick(markets[def.id]));
+  checkLiquidationsAllProfiles();
   renderLivePrices();
 
-  if (currentView === "dashboard") {
-    renderDashboard();
-  } else {
-    updateMarketDynamic();
+  if (activeProfile()) {
+    if (currentView === "dashboard") renderDashboard();
+    else if (currentView === "leaderboard") renderLeaderboard();
+    else if (currentView === "market") updateMarketDynamic();
   }
 
   tickCounter++;
-  if (tickCounter % SAVE_EVERY_N_TICKS === 0) saveState();
+  if (tickCounter % SAVE_EVERY_N_TICKS === 0) saveMarkets();
 }
 
 /* ============================== EVENT-BINDUNGEN ============================== */
 
 function attachEventListeners() {
+  // Auth
+  document.querySelectorAll(".auth-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      authMode = tab.dataset.tab;
+      document.querySelectorAll(".auth-tab").forEach(t => t.classList.toggle("active", t === tab));
+      document.getElementById("authSubmitBtn").textContent = authMode === "login" ? "Anmelden" : "Registrieren";
+      clearAuthError();
+    });
+  });
+
+  document.getElementById("authSubmitBtn").addEventListener("click", () => {
+    const username = document.getElementById("authUsername").value;
+    const password = document.getElementById("authPassword").value;
+    clearAuthError();
+    if (authMode === "login") handleLogin(username, password);
+    else handleRegister(username, password);
+  });
+
+  document.getElementById("authPassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("authSubmitBtn").click();
+  });
+  document.getElementById("authUsername").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("authPassword").focus();
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", handleLogout);
+
+  // Reset
   document.getElementById("resetBtn").addEventListener("click", showResetModal);
   document.getElementById("cancelResetBtn").addEventListener("click", hideResetModal);
   document.getElementById("confirmResetBtn").addEventListener("click", performReset);
@@ -1560,6 +2018,7 @@ function attachEventListeners() {
   document.getElementById("hamburgerBtn").addEventListener("click", openSidebarMobile);
   document.getElementById("sidebarOverlay").addEventListener("click", closeSidebarMobile);
 
+  // Order-Panel
   document.querySelectorAll(".side-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       orderSide = btn.dataset.side;
@@ -1578,8 +2037,10 @@ function attachEventListeners() {
 
   document.querySelectorAll(".quick-pct button").forEach(btn => {
     btn.addEventListener("click", () => {
+      const profile = activeProfile();
+      if (!profile) return;
       const pct = parseFloat(btn.dataset.pct);
-      const val = Math.max(0, state.cash * pct);
+      const val = Math.max(0, profile.cash * pct);
       document.getElementById("amountInput").value = val > 0 ? val.toFixed(2) : "";
       updateOrderPreview();
     });
@@ -1599,28 +2060,42 @@ function attachEventListeners() {
 
   document.getElementById("positionsTableBody").addEventListener("click", (e) => {
     const btn = e.target.closest(".btn-close-pos");
-    if (btn) closePosition(btn.dataset.id, "manual");
+    const profile = activeProfile();
+    if (btn && profile) closePositionForProfile(profile, btn.dataset.id, "manual");
   });
   document.getElementById("mktPositionsBody").addEventListener("click", (e) => {
     const btn = e.target.closest(".btn-close-pos");
-    if (btn) closePosition(btn.dataset.id, "manual");
+    const profile = activeProfile();
+    if (btn && profile) closePositionForProfile(profile, btn.dataset.id, "manual");
   });
 
   window.addEventListener("resize", () => {
-    if (currentView === "market") updateMarketDynamic();
+    if (currentView === "market" && activeProfile()) updateMarketDynamic();
   });
 
-  window.addEventListener("beforeunload", saveState);
+  window.addEventListener("beforeunload", () => { saveMarkets(); saveProfiles(); });
 }
 
 /* ============================== INITIALISIERUNG ============================== */
 
 function init() {
-  loadState();
+  loadMarkets();
+  loadProfiles();
+  migrateOldStateIfNeeded();
+  loadSession();
+
   buildSidebarNav();
   attachEventListeners();
-  showView("dashboard");
   renderLivePrices();
+
+  if (activeProfile()) {
+    updateSidebarUser();
+    hideAuthOverlay();
+    showView("dashboard");
+  } else {
+    showAuthOverlay();
+  }
+
   tickHandle = setInterval(tick, MICRO_TICK_MS);
 }
 
