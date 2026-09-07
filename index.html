@@ -424,6 +424,12 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
   width:100%;
   height:100%;
   display:block;
+  touch-action: none;
+}
+.chart-hint{
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 10px;
 }
 
 /* ===== TRADE GRID ===== */
@@ -522,6 +528,64 @@ tbody tr:hover{ background: rgba(255,255,255,0.02); }
   background: var(--accent-dim);
   border-color: rgba(59,130,246,0.45);
   color: var(--accent);
+}
+
+.tpsl-inputs{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+.tpsl-inputs input{
+  width:100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 10px 11px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight:600;
+}
+.tpsl-inputs input:focus{ border-color: var(--accent); }
+.optional-tag{
+  text-transform: none;
+  font-weight:400;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.tpsl-cell{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.tpsl-btn{
+  font-size: 11px;
+  font-weight:700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  white-space: nowrap;
+  text-align:left;
+  transition: all .15s ease;
+}
+.tpsl-btn:hover{ border-color:#3a4358; color: var(--text); }
+.tpsl-btn.tpsl-tp{ color: var(--green); }
+.tpsl-btn.tpsl-tp:hover{ background: var(--green-dim); border-color: rgba(34,197,94,0.4); }
+.tpsl-btn.tpsl-sl{ color: var(--red); }
+.tpsl-btn.tpsl-sl:hover{ background: var(--red-dim); border-color: rgba(239,68,68,0.4); }
+
+.reason-tp{
+  font-size:10.5px;
+  color: var(--green);
+  margin-left:6px;
+}
+.reason-sl{
+  font-size:10.5px;
+  color: var(--orange);
+  margin-left:6px;
 }
 
 .order-preview{
@@ -769,6 +833,7 @@ tr.reset-row td{
   color: var(--text-dim);
   background: rgba(255,255,255,0.02);
 }
+
 </style>
 </head>
 <body>
@@ -852,7 +917,7 @@ tr.reset-row td{
               <thead>
                 <tr>
                   <th>Markt</th><th>Richtung</th><th>Einstieg</th><th>Aktuell</th>
-                  <th>Hebel</th><th>Größe</th><th>G/V</th><th>G/V %</th><th></th>
+                  <th>Hebel</th><th>Größe</th><th>G/V</th><th>G/V %</th><th>TP / SL</th><th></th>
                 </tr>
               </thead>
               <tbody id="positionsTableBody"></tbody>
@@ -923,6 +988,7 @@ tr.reset-row td{
           <div class="chart-wrap">
             <canvas id="chartCanvas"></canvas>
           </div>
+          <p class="chart-hint">💡 TP-/SL-Linien (grün/rot) können direkt im Chart mit der Maus verschoben werden.</p>
         </div>
 
         <div class="trade-grid">
@@ -952,6 +1018,17 @@ tr.reset-row td{
               <button class="lev-btn" data-lev="20">20x</button>
             </div>
 
+            <div class="tpsl-inputs">
+              <div>
+                <label class="field-label">Take-Profit <span class="optional-tag">optional</span></label>
+                <input type="number" id="tpInput" min="0" step="0.01" placeholder="Kurs" autocomplete="off" />
+              </div>
+              <div>
+                <label class="field-label">Stop-Loss <span class="optional-tag">optional</span></label>
+                <input type="number" id="slInput" min="0" step="0.01" placeholder="Kurs" autocomplete="off" />
+              </div>
+            </div>
+
             <div class="order-preview" id="orderPreview"></div>
 
             <button class="btn-primary btn-open" id="openPosBtn">Position eröffnen</button>
@@ -964,7 +1041,7 @@ tr.reset-row td{
                 <thead>
                   <tr>
                     <th>Richtung</th><th>Einstieg</th><th>Aktuell</th><th>Hebel</th>
-                    <th>Größe</th><th>G/V</th><th>G/V %</th><th></th>
+                    <th>Größe</th><th>G/V</th><th>G/V %</th><th>TP / SL</th><th></th>
                   </tr>
                 </thead>
                 <tbody id="mktPositionsBody"></tbody>
@@ -1086,6 +1163,10 @@ let orderLeverage = 1;
 let authMode = "login";               // "login" | "register"
 let tickCounter = 0;
 let tickHandle = null;
+
+/* Chart-Skalierung des zuletzt gezeichneten Charts (für TP/SL-Drag per Maus/Touch) */
+let lastChartScale = null;            // { padding, minP, maxP, plotH, decimals }
+let dragState = null;                 // { positionId, field: "tp"|"sl" }
 
 /* ============================== UTILS ============================== */
 
@@ -1327,7 +1408,7 @@ function migrateOldStateIfNeeded() {
       passwordHash: hashPassword(""),
       createdAt: Date.now(),
       cash: typeof old.cash === "number" && isFinite(old.cash) ? old.cash : STARTING_CASH,
-      positions: Array.isArray(old.positions) ? old.positions : [],
+      positions: Array.isArray(old.positions) ? old.positions.map(p => ({ tp: null, sl: null, ...p })) : [],
       history: Array.isArray(old.history) ? old.history.map(h => ({ ...h, type: "trade" })) : [],
     };
     if (old.markets && typeof old.markets === "object") {
@@ -1473,6 +1554,30 @@ function handleOpenPosition() {
   const size = amount * leverage;
   const liqPrice = computeLiqPrice(entryPrice, side, leverage);
 
+  // Optionale Take-Profit / Stop-Loss Kurse einlesen und validieren
+  const tpRaw = document.getElementById("tpInput").value.trim();
+  const slRaw = document.getElementById("slInput").value.trim();
+  let tp = null, sl = null;
+
+  if (tpRaw !== "") {
+    tp = parseFloat(tpRaw);
+    if (!isFinite(tp) || tp <= 0) { toast("Ungültiger Take-Profit-Kurs.", "error"); return; }
+    const valid = side === "long" ? tp > entryPrice : tp < entryPrice;
+    if (!valid) {
+      toast(`Take-Profit muss bei ${side === "long" ? "Long über" : "Short unter"} dem Einstiegspreis liegen.`, "error");
+      return;
+    }
+  }
+  if (slRaw !== "") {
+    sl = parseFloat(slRaw);
+    if (!isFinite(sl) || sl <= 0) { toast("Ungültiger Stop-Loss-Kurs.", "error"); return; }
+    const valid = side === "long" ? sl < entryPrice : sl > entryPrice;
+    if (!valid) {
+      toast(`Stop-Loss muss bei ${side === "long" ? "Long unter" : "Short über"} dem Einstiegspreis liegen.`, "error");
+      return;
+    }
+  }
+
   const pos = {
     id: uid(),
     marketId: currentMarketId,
@@ -1482,6 +1587,8 @@ function handleOpenPosition() {
     size,
     entryPrice,
     liqPrice,
+    tp,
+    sl,
     openTime: Date.now(),
   };
 
@@ -1490,8 +1597,49 @@ function handleOpenPosition() {
   saveProfiles();
 
   amountInput.value = "";
+  document.getElementById("tpInput").value = "";
+  document.getElementById("slInput").value = "";
   toast(`Position eröffnet: ${side === "long" ? "Long" : "Short"} ${def.name} · ${leverage}x`, "success");
 
+  rerenderAll();
+}
+
+/* Take-Profit / Stop-Loss über die Tabellen-Buttons setzen, ändern oder entfernen */
+function handleTpslButtonClick(btn) {
+  const profile = activeProfile();
+  if (!profile) return;
+  const pos = profile.positions.find(p => p.id === btn.dataset.id);
+  if (!pos) return;
+
+  const field = btn.dataset.field; // "tp" | "sl"
+  const def = marketDef(pos.marketId);
+  const label = field === "tp" ? "Take-Profit" : "Stop-Loss";
+  const current = pos[field];
+
+  const input = window.prompt(
+    `${label} für ${def.name} (${pos.side === "long" ? "Long" : "Short"}) – Kurs eingeben (leer lassen zum Entfernen):`,
+    current != null ? String(current) : ""
+  );
+  if (input === null) return; // abgebrochen
+
+  const trimmed = input.trim().replace(",", ".");
+  if (trimmed === "") {
+    pos[field] = null;
+  } else {
+    const val = parseFloat(trimmed);
+    if (!isFinite(val) || val <= 0) { toast("Ungültiger Kurswert.", "error"); return; }
+
+    if (field === "tp") {
+      const valid = pos.side === "long" ? val > pos.entryPrice : val < pos.entryPrice;
+      if (!valid) { toast(`Take-Profit muss ${pos.side === "long" ? "über" : "unter"} dem Einstiegspreis liegen.`, "error"); return; }
+    } else {
+      const valid = pos.side === "long" ? val < pos.entryPrice : val > pos.entryPrice;
+      if (!valid) { toast(`Stop-Loss muss ${pos.side === "long" ? "unter" : "über"} dem Einstiegspreis liegen.`, "error"); return; }
+    }
+    pos[field] = val;
+  }
+
+  saveProfiles();
   rerenderAll();
 }
 
@@ -1530,6 +1678,10 @@ function closePositionForProfile(profile, id, reason) {
     const def = marketDef(pos.marketId);
     if (reason === "liquidation") {
       toast(`⚠️ Position liquidiert: ${def.name} (${pos.side === "long" ? "Long" : "Short"} ${pos.leverage}x) – Verlust ${fmtMoney(pnl)}`, "error");
+    } else if (reason === "take-profit") {
+      toast(`🎯 Take-Profit erreicht: ${def.name} · +${fmtMoney(pnl)}`, "success");
+    } else if (reason === "stop-loss") {
+      toast(`🛑 Stop-Loss ausgelöst: ${def.name} · ${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}`, pnl >= 0 ? "success" : "error");
     } else {
       toast(`Position geschlossen: ${def.name} · ${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}`, pnl >= 0 ? "success" : "error");
     }
@@ -1537,18 +1689,28 @@ function closePositionForProfile(profile, id, reason) {
   }
 }
 
-function checkLiquidationsAllProfiles() {
+/* Prüft für ALLE Profile (unabhängig vom Login) jeden Tick, ob eine Position
+   liquidiert werden muss oder ihr Take-Profit/Stop-Loss erreicht wurde.
+   Reihenfolge: Liquidation > Take-Profit > Stop-Loss. */
+function checkAutoClosesAllProfiles() {
   Object.values(profiles).forEach(profile => {
     const snapshot = profile.positions.slice();
     for (const pos of snapshot) {
-      if (pos.liqPrice == null) continue;
       const m = markets[pos.marketId];
       if (!m) continue;
       const price = m.cur.c;
-      if (pos.side === "long" && price <= pos.liqPrice) {
-        closePositionForProfile(profile, pos.id, "liquidation");
-      } else if (pos.side === "short" && price >= pos.liqPrice) {
-        closePositionForProfile(profile, pos.id, "liquidation");
+
+      if (pos.liqPrice != null) {
+        if (pos.side === "long" && price <= pos.liqPrice) { closePositionForProfile(profile, pos.id, "liquidation"); continue; }
+        if (pos.side === "short" && price >= pos.liqPrice) { closePositionForProfile(profile, pos.id, "liquidation"); continue; }
+      }
+      if (pos.tp != null) {
+        if (pos.side === "long" && price >= pos.tp) { closePositionForProfile(profile, pos.id, "take-profit"); continue; }
+        if (pos.side === "short" && price <= pos.tp) { closePositionForProfile(profile, pos.id, "take-profit"); continue; }
+      }
+      if (pos.sl != null) {
+        if (pos.side === "long" && price <= pos.sl) { closePositionForProfile(profile, pos.id, "stop-loss"); continue; }
+        if (pos.side === "short" && price >= pos.sl) { closePositionForProfile(profile, pos.id, "stop-loss"); continue; }
       }
     }
   });
@@ -1568,7 +1730,7 @@ function drawChart(canvas, candles, decimals, positions) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
-  if (!candles.length) return;
+  if (!candles.length) { lastChartScale = null; return; }
 
   const padding = { top: 14, right: 66, bottom: 10, left: 6 };
   const plotW = W - padding.left - padding.right;
@@ -1581,13 +1743,16 @@ function drawChart(canvas, candles, decimals, positions) {
   }
   if (positions && positions.length) {
     for (const p of positions) {
-      maxP = Math.max(maxP, p.entryPrice, p.liqPrice || p.entryPrice);
-      minP = Math.min(minP, p.entryPrice, p.liqPrice || p.entryPrice);
+      maxP = Math.max(maxP, p.entryPrice, p.liqPrice || p.entryPrice, p.tp || p.entryPrice, p.sl || p.entryPrice);
+      minP = Math.min(minP, p.entryPrice, p.liqPrice || p.entryPrice, p.tp || p.entryPrice, p.sl || p.entryPrice);
     }
   }
   if (maxP === minP) { maxP += 1; minP -= 1; }
   const pad = (maxP - minP) * 0.1;
   maxP += pad; minP -= pad;
+
+  // Skalierung merken, damit Maus-/Touch-Events (TP/SL ziehen) Pixel in Kurse umrechnen können
+  lastChartScale = { padding, minP, maxP, plotH, decimals };
 
   const priceToY = p => padding.top + (1 - (p - minP) / (maxP - minP)) * plotH;
 
@@ -1632,8 +1797,10 @@ function drawChart(canvas, candles, decimals, positions) {
 
   if (positions && positions.length) {
     for (const p of positions) {
-      drawDashedHLine(ctx, priceToY(p.entryPrice), W, padding, "#3b82f6");
-      if (p.liqPrice != null) drawDashedHLine(ctx, priceToY(p.liqPrice), W, padding, "#f59e0b");
+      drawDashedHLine(ctx, priceToY(p.entryPrice), W, padding, "#3b82f6", `Entry ${fmtPrice(p.entryPrice, decimals)}`);
+      if (p.liqPrice != null) drawDashedHLine(ctx, priceToY(p.liqPrice), W, padding, "#f59e0b", `Liq ${fmtPrice(p.liqPrice, decimals)}`);
+      if (p.tp != null) drawDashedHLine(ctx, priceToY(p.tp), W, padding, "#22c55e", `TP ${fmtPrice(p.tp, decimals)}`);
+      if (p.sl != null) drawDashedHLine(ctx, priceToY(p.sl), W, padding, "#ef4444", `SL ${fmtPrice(p.sl, decimals)}`);
     }
   }
 
@@ -1649,7 +1816,7 @@ function drawChart(canvas, candles, decimals, positions) {
   ctx.restore();
 }
 
-function drawDashedHLine(ctx, y, W, padding, color) {
+function drawDashedHLine(ctx, y, W, padding, color, label) {
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
@@ -1658,14 +1825,107 @@ function drawDashedHLine(ctx, y, W, padding, color) {
   ctx.moveTo(padding.left, y);
   ctx.lineTo(W - padding.right, y);
   ctx.stroke();
+  if (label) {
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.font = "10px -apple-system, Segoe UI, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, W - padding.right + 6, y);
+  }
   ctx.restore();
+}
+
+/* ============================== TP/SL DRAG (Maus + Touch) ============================== */
+
+function priceFromChartY(y) {
+  if (!lastChartScale) return null;
+  const { padding, minP, maxP, plotH } = lastChartScale;
+  const ratio = 1 - (y - padding.top) / plotH;
+  return minP + ratio * (maxP - minP);
+}
+
+function priceToChartY(price) {
+  const { padding, minP, maxP, plotH } = lastChartScale;
+  return padding.top + (1 - (price - minP) / (maxP - minP)) * plotH;
+}
+
+function findNearestDraggableLine(mouseY) {
+  const profile = activeProfile();
+  if (!profile || !lastChartScale) return null;
+
+  const positionsForMarket = profile.positions.filter(p => p.marketId === currentMarketId);
+  let best = null;
+  let bestDist = 8; // Toleranz in Pixel
+
+  positionsForMarket.forEach(pos => {
+    if (pos.tp != null) {
+      const d = Math.abs(mouseY - priceToChartY(pos.tp));
+      if (d < bestDist) { bestDist = d; best = { positionId: pos.id, field: "tp" }; }
+    }
+    if (pos.sl != null) {
+      const d = Math.abs(mouseY - priceToChartY(pos.sl));
+      if (d < bestDist) { bestDist = d; best = { positionId: pos.id, field: "sl" }; }
+    }
+  });
+  return best;
+}
+
+function onChartPointerDown(clientY) {
+  const canvas = document.getElementById("chartCanvas");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const mouseY = clientY - rect.top;
+  const hit = findNearestDraggableLine(mouseY);
+  if (hit) dragState = hit;
+}
+
+function onChartPointerMove(clientY) {
+  const canvas = document.getElementById("chartCanvas");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const mouseY = clientY - rect.top;
+
+  if (!dragState) {
+    const hit = findNearestDraggableLine(mouseY);
+    canvas.style.cursor = hit ? "ns-resize" : "crosshair";
+    return;
+  }
+
+  const profile = activeProfile();
+  if (!profile) { dragState = null; return; }
+  const pos = profile.positions.find(p => p.id === dragState.positionId);
+  if (!pos) { dragState = null; return; }
+
+  let price = priceFromChartY(mouseY);
+  if (price == null || !isFinite(price) || price <= 0) return;
+
+  // Verhindert, dass TP/SL beim Ziehen auf die falsche Seite des Einstiegspreises rutscht
+  const epsilon = Math.max(price * 0.0005, 0.0000001);
+  if (dragState.field === "tp") {
+    price = pos.side === "long" ? Math.max(price, pos.entryPrice + epsilon) : Math.min(price, pos.entryPrice - epsilon);
+    pos.tp = price;
+  } else {
+    price = pos.side === "long" ? Math.min(price, pos.entryPrice - epsilon) : Math.max(price, pos.entryPrice + epsilon);
+    pos.sl = price;
+  }
+
+  updateMarketDynamic();
+}
+
+function onChartPointerUp() {
+  if (dragState) {
+    saveProfiles();
+    dragState = null;
+    toast("TP/SL aktualisiert.", "success");
+    rerenderAll();
+  }
 }
 
 /* ============================== UI RENDERING ============================== */
 
 function renderPositionsTable(tbody, positions, showMarket) {
   if (!positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="${showMarket ? 9 : 8}">Keine offenen Positionen</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${showMarket ? 10 : 9}">Keine offenen Positionen</td></tr>`;
     return;
   }
   tbody.innerHTML = positions.map(pos => {
@@ -1676,6 +1936,8 @@ function renderPositionsTable(tbody, positions, showMarket) {
     const pnlClass = pnl >= 0 ? "text-green" : "text-red";
     const dirClass = pos.side === "long" ? "dir-long" : "dir-short";
     const dirLabel = pos.side === "long" ? "Long" : "Short";
+    const tpText = pos.tp != null ? fmtPrice(pos.tp, def.decimals) : "–";
+    const slText = pos.sl != null ? fmtPrice(pos.sl, def.decimals) : "–";
     return `<tr>
       ${showMarket ? `<td>${def.name}</td>` : ""}
       <td><span class="dir-badge ${dirClass}">${dirLabel}</span></td>
@@ -1685,6 +1947,12 @@ function renderPositionsTable(tbody, positions, showMarket) {
       <td>${fmtMoney(pos.size)}</td>
       <td class="${pnlClass}">${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}</td>
       <td class="${pnlClass}">${fmtPct(pnlPct)}</td>
+      <td>
+        <div class="tpsl-cell">
+          <button class="tpsl-btn tpsl-tp" data-id="${pos.id}" data-field="tp">TP ${tpText}</button>
+          <button class="tpsl-btn tpsl-sl" data-id="${pos.id}" data-field="sl">SL ${slText}</button>
+        </div>
+      </td>
       <td><button class="btn-close-pos" data-id="${pos.id}">Schließen</button></td>
     </tr>`;
   }).join("");
@@ -1706,7 +1974,11 @@ function renderHistoryTable(tbody, history) {
     return `<tr>
       <td>${fmtDateTime(h.closeTime)}</td>
       <td>${def.name}</td>
-      <td><span class="dir-badge ${dirClass}">${dirLabel}</span>${h.reason === "liquidation" ? '<span class="reason-liq">LIQUIDIERT</span>' : ""}</td>
+      <td><span class="dir-badge ${dirClass}">${dirLabel}</span>${
+        h.reason === "liquidation" ? '<span class="reason-liq">LIQUIDIERT</span>' :
+        h.reason === "take-profit" ? '<span class="reason-tp">TAKE-PROFIT</span>' :
+        h.reason === "stop-loss" ? '<span class="reason-sl">STOP-LOSS</span>' : ""
+      }</td>
       <td>${fmtPrice(h.entryPrice, def.decimals)}</td>
       <td>${fmtPrice(h.exitPrice, def.decimals)}</td>
       <td>${h.leverage}x</td>
@@ -1799,11 +2071,38 @@ function updateOrderPreview() {
     return `<div class="preview-row"><span>${pct > 0 ? "+" : ""}${pct}% Kursbewegung</span><span class="${pnl >= 0 ? "text-green" : "text-red"}">${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}</span></div>`;
   }).join("");
 
+  const tpRawVal = parseFloat(document.getElementById("tpInput").value);
+  const slRawVal = parseFloat(document.getElementById("slInput").value);
+  let tpRow = "";
+  let slRow = "";
+
+  if (isFinite(tpRawVal) && tpRawVal > 0) {
+    const valid = orderSide === "long" ? tpRawVal > price : tpRawVal < price;
+    if (valid) {
+      const pct = (tpRawVal - price) / price * (orderSide === "long" ? 1 : -1);
+      const pnl = size * pct;
+      tpRow = `<div class="preview-row"><span>🎯 Take-Profit bei ${fmtPrice(tpRawVal, def.decimals)}</span><span class="text-green">+${fmtMoney(pnl)}</span></div>`;
+    } else {
+      tpRow = `<div class="preview-row"><span>🎯 Take-Profit</span><span class="text-red">ungültig</span></div>`;
+    }
+  }
+  if (isFinite(slRawVal) && slRawVal > 0) {
+    const valid = orderSide === "long" ? slRawVal < price : slRawVal > price;
+    if (valid) {
+      const pct = (slRawVal - price) / price * (orderSide === "long" ? 1 : -1);
+      const pnl = size * pct;
+      slRow = `<div class="preview-row"><span>🛑 Stop-Loss bei ${fmtPrice(slRawVal, def.decimals)}</span><span class="text-red">${fmtMoney(pnl)}</span></div>`;
+    } else {
+      slRow = `<div class="preview-row"><span>🛑 Stop-Loss</span><span class="text-red">ungültig</span></div>`;
+    }
+  }
+
   document.getElementById("orderPreview").innerHTML = `
     <div class="preview-row"><span>Positionswert</span><span>${fmtMoney(size)}</span></div>
     <div class="preview-row"><span>Einstiegspreis</span><span>${fmtPrice(price, def.decimals)}</span></div>
     <div class="preview-row"><span>Liquidationspreis</span><span class="text-orange">${liqPrice != null ? fmtPrice(liqPrice, def.decimals) : "kein Risiko (1x)"}</span></div>
     <div class="preview-row"><span>Max. Risiko</span><span class="text-red">${fmtMoney(amount)}</span></div>
+    ${tpRow}${slRow}
     <div class="scenario-title">Geschätzte Gewinne / Verluste</div>
     ${scenarioRows}
   `;
@@ -1817,6 +2116,8 @@ function renderMarketStatic() {
   document.getElementById("topbarTitle").textContent = def.name;
 
   document.getElementById("amountInput").value = "";
+  document.getElementById("tpInput").value = "";
+  document.getElementById("slInput").value = "";
   orderSide = "long";
   orderLeverage = 1;
   document.querySelectorAll(".side-btn").forEach(b => b.classList.toggle("active", b.dataset.side === orderSide));
@@ -1964,7 +2265,7 @@ function performReset() {
 
 function tick() {
   MARKETS.forEach(def => microTick(markets[def.id]));
-  checkLiquidationsAllProfiles();
+  checkAutoClosesAllProfiles();
   renderLivePrices();
 
   if (activeProfile()) {
@@ -2047,6 +2348,8 @@ function attachEventListeners() {
   });
 
   document.getElementById("amountInput").addEventListener("input", updateOrderPreview);
+  document.getElementById("tpInput").addEventListener("input", updateOrderPreview);
+  document.getElementById("slInput").addEventListener("input", updateOrderPreview);
 
   document.getElementById("timeframeBar").addEventListener("click", (e) => {
     const btn = e.target.closest(".tf-btn");
@@ -2059,15 +2362,39 @@ function attachEventListeners() {
   document.getElementById("openPosBtn").addEventListener("click", handleOpenPosition);
 
   document.getElementById("positionsTableBody").addEventListener("click", (e) => {
-    const btn = e.target.closest(".btn-close-pos");
+    const closeBtn = e.target.closest(".btn-close-pos");
+    const tpslBtn = e.target.closest(".tpsl-btn");
     const profile = activeProfile();
-    if (btn && profile) closePositionForProfile(profile, btn.dataset.id, "manual");
+    if (closeBtn && profile) closePositionForProfile(profile, closeBtn.dataset.id, "manual");
+    else if (tpslBtn) handleTpslButtonClick(tpslBtn);
   });
   document.getElementById("mktPositionsBody").addEventListener("click", (e) => {
-    const btn = e.target.closest(".btn-close-pos");
+    const closeBtn = e.target.closest(".btn-close-pos");
+    const tpslBtn = e.target.closest(".tpsl-btn");
     const profile = activeProfile();
-    if (btn && profile) closePositionForProfile(profile, btn.dataset.id, "manual");
+    if (closeBtn && profile) closePositionForProfile(profile, closeBtn.dataset.id, "manual");
+    else if (tpslBtn) handleTpslButtonClick(tpslBtn);
   });
+
+  // TP/SL-Linien im Chart per Maus ziehen
+  const chartCanvas = document.getElementById("chartCanvas");
+  chartCanvas.addEventListener("mousedown", (e) => onChartPointerDown(e.clientY));
+  chartCanvas.addEventListener("mousemove", (e) => onChartPointerMove(e.clientY));
+  window.addEventListener("mouseup", onChartPointerUp);
+  chartCanvas.addEventListener("mouseleave", () => { if (!dragState) chartCanvas.style.cursor = "default"; });
+
+  // TP/SL-Linien im Chart per Touch ziehen (Tablet/Mobile)
+  chartCanvas.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    onChartPointerDown(e.touches[0].clientY);
+    if (dragState) e.preventDefault();
+  }, { passive: false });
+  chartCanvas.addEventListener("touchmove", (e) => {
+    if (!dragState) return;
+    e.preventDefault();
+    onChartPointerMove(e.touches[0].clientY);
+  }, { passive: false });
+  chartCanvas.addEventListener("touchend", onChartPointerUp);
 
   window.addEventListener("resize", () => {
     if (currentView === "market" && activeProfile()) updateMarketDynamic();
@@ -2100,6 +2427,7 @@ function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
 </script>
 </body>
 </html>
