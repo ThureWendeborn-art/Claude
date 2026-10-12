@@ -1106,7 +1106,7 @@ tr.reset-row td{
 "use strict";
 
 /* =========================================================================
-   TRADING SIMULATOR – KOMPLETTE LOGIK (v2: Login + Rangliste)
+   TRADING SIMULATOR – KOMPLETTE LOGIK (v4: Login, Rangliste, TP/SL, realistisches Kursmodell)
    Reines Frontend, keine Backend-Verbindung, keine echten Kurse/Broker.
    Alle Kurse werden clientseitig simuliert. Speicherung via localStorage.
 
@@ -1122,20 +1122,46 @@ tr.reset-row td{
 
 const STORAGE_PROFILES = "tradesim_profiles_v2";
 const STORAGE_SESSION  = "tradesim_session_v2";
-const STORAGE_MARKETS  = "tradesim_markets_v2";
+const STORAGE_MARKETS  = "tradesim_markets_v3";
+const STORAGE_MARKETS_V2 = "tradesim_markets_v2"; // altes, weniger realistisches Kursmodell (wird migriert)
 const STORAGE_OLD_V1   = "tradesim_state_v1"; // für Migration aus der Vorversion
 
 const STARTING_CASH = 100;
 
+const CATEGORY_ORDER  = ["crypto", "stock", "commodity", "index", "fx"];
+const CATEGORY_LABELS = { crypto: "Krypto", stock: "Aktien", commodity: "Rohstoffe", index: "Indizes", fx: "Forex" };
+
+/* Wie stark Märkte einer Kategorie gemeinsam schwanken (Krypto mit Krypto, Aktien mit Aktien ...) */
+const CATEGORY_LOADING = { crypto: 0.70, stock: 0.50, commodity: 0.35, index: 0.60, fx: 0.30 };
+
+/* Kursmodell-Parameter pro Markt:
+   vol      = typische Schwankung pro Tick (1 Tick = 1 reale Sekunde)
+   devStd   = typische Abweichung vom "fairen Wert" (bestimmt die Stärke der Mean Reversion)
+   range    = maximaler Korridor des fairen Werts um den Basiskurs (log, z. B. 0.30 = ca. ±30 %)
+   jumpSize = typische Größe eines Nachrichten-Sprungs
+   corr     = Kopplung an den allgemeinen Gesamtmarkt (Gold leicht negativ) */
 const MARKETS = [
-  { id: "btc",    name: "Bitcoin",     symbol: "BTC/USD", price: 65000, vol: 0.0060, decimals: 2 },
-  { id: "eth",    name: "Ethereum",    symbol: "ETH/USD", price: 3200,  vol: 0.0070, decimals: 2 },
-  { id: "aapl",   name: "Apple",       symbol: "AAPL",    price: 195,   vol: 0.0030, decimals: 2 },
-  { id: "nvda",   name: "NVIDIA",      symbol: "NVDA",    price: 120,   vol: 0.0050, decimals: 2 },
-  { id: "tsla",   name: "Tesla",       symbol: "TSLA",    price: 250,   vol: 0.0060, decimals: 2 },
-  { id: "gold",   name: "Gold",        symbol: "XAU/USD", price: 2400,  vol: 0.0020, decimals: 2 },
-  { id: "sp500",  name: "S&P 500",     symbol: "US500",   price: 5500,  vol: 0.0015, decimals: 2 },
-  { id: "eurusd", name: "EUR/USD",     symbol: "EUR/USD", price: 1.09,  vol: 0.0009, decimals: 5 },
+  // Krypto
+  { id: "btc",    category: "crypto",    name: "Bitcoin",     symbol: "BTC/USD", price: 65000, decimals: 2, vol: 0.00098, devStd: 0.035,  range: 0.30,  jumpSize: 0.0105, corr: 0.30 },
+  { id: "eth",    category: "crypto",    name: "Ethereum",    symbol: "ETH/USD", price: 3200,  decimals: 2, vol: 0.00119, devStd: 0.042,  range: 0.34,  jumpSize: 0.0125, corr: 0.32 },
+  { id: "sol",    category: "crypto",    name: "Solana",      symbol: "SOL/USD", price: 150,   decimals: 2, vol: 0.00147, devStd: 0.055,  range: 0.42,  jumpSize: 0.0170, corr: 0.32 },
+  // Aktien
+  { id: "aapl",   category: "stock",     name: "Apple",       symbol: "AAPL",    price: 195,   decimals: 2, vol: 0.00049, devStd: 0.016,  range: 0.20,  jumpSize: 0.0050, corr: 0.40 },
+  { id: "nvda",   category: "stock",     name: "NVIDIA",      symbol: "NVDA",    price: 120,   decimals: 2, vol: 0.00084, devStd: 0.028,  range: 0.28,  jumpSize: 0.0085, corr: 0.50 },
+  { id: "tsla",   category: "stock",     name: "Tesla",       symbol: "TSLA",    price: 250,   decimals: 2, vol: 0.00098, devStd: 0.034,  range: 0.30,  jumpSize: 0.0105, corr: 0.35 },
+  { id: "msft",   category: "stock",     name: "Microsoft",   symbol: "MSFT",    price: 420,   decimals: 2, vol: 0.00042, devStd: 0.014,  range: 0.18,  jumpSize: 0.0042, corr: 0.45 },
+  { id: "amzn",   category: "stock",     name: "Amazon",      symbol: "AMZN",    price: 185,   decimals: 2, vol: 0.00056, devStd: 0.019,  range: 0.22,  jumpSize: 0.0056, corr: 0.45 },
+  { id: "googl",  category: "stock",     name: "Alphabet",    symbol: "GOOGL",   price: 170,   decimals: 2, vol: 0.00056, devStd: 0.019,  range: 0.22,  jumpSize: 0.0056, corr: 0.45 },
+  // Rohstoffe
+  { id: "gold",   category: "commodity", name: "Gold",        symbol: "XAU/USD", price: 2400,  decimals: 2, vol: 0.00035, devStd: 0.0075, range: 0.12,  jumpSize: 0.0028, corr: -0.20 },
+  { id: "silver", category: "commodity", name: "Silber",      symbol: "XAG/USD", price: 28,    decimals: 3, vol: 0.00063, devStd: 0.017,  range: 0.20,  jumpSize: 0.0050, corr: 0.10 },
+  { id: "oil",    category: "commodity", name: "Rohöl (WTI)", symbol: "WTI/USD", price: 78,    decimals: 2, vol: 0.00070, devStd: 0.020,  range: 0.22,  jumpSize: 0.0056, corr: 0.20 },
+  // Indizes
+  { id: "sp500",  category: "index",     name: "S&P 500",     symbol: "US500",   price: 5500,  decimals: 2, vol: 0.00028, devStd: 0.0065, range: 0.10,  jumpSize: 0.0020, corr: 0.65 },
+  { id: "dax",    category: "index",     name: "DAX 40",      symbol: "GER40",   price: 18500, decimals: 2, vol: 0.00029, devStd: 0.0070, range: 0.11,  jumpSize: 0.0020, corr: 0.60 },
+  // Forex
+  { id: "eurusd", category: "fx",        name: "EUR/USD",     symbol: "EUR/USD", price: 1.09,  decimals: 5, vol: 0.00015, devStd: 0.0028, range: 0.045, jumpSize: 0.0008, corr: 0.05 },
+  { id: "gbpusd", category: "fx",        name: "GBP/USD",     symbol: "GBP/USD", price: 1.27,  decimals: 5, vol: 0.00018, devStd: 0.0033, range: 0.050, jumpSize: 0.0010, corr: 0.10 },
 ];
 
 const LEVERAGES = [1, 2, 5, 10, 20];
@@ -1145,7 +1171,7 @@ const TICKS_PER_CANDLE = 4;       // 4 Ticks = 1 simulierte 1-Minuten-Kerze
 const SEED_CANDLES = 720;         // Anfangshistorie: 720 Minuten = 12 Stunden
 const MAX_CANDLES = 1440;         // maximal gespeicherte 1M-Kerzen (= 1 simulierter Tag)
 const CHART_CANDLE_COUNT = 110;   // sichtbare Kerzen im Chart
-const SAVE_EVERY_N_TICKS = 8;     // Auto-Save der Kursdaten alle ~8 Sekunden
+const SAVE_EVERY_N_TICKS = 12;    // Auto-Save der Kursdaten alle ~12 Sekunden
 
 const TF_GROUP = { "1m": 1, "5m": 5, "15m": 15, "1h": 60, "1d": 1440 };
 
@@ -1230,51 +1256,119 @@ function normalizeUsername(u) {
 
 /* ========================= KURS-SIMULATIONS-ENGINE ========================= */
 /* Ein einziger geteilter Markt für ALLE Spieler – läuft unabhängig davon,
-   wer gerade eingeloggt ist. */
+   wer gerade eingeloggt ist.
 
-function priceStep(m) {
-  const shock = randNorm();
-  const spike = Math.random() < 0.01 ? (2 + Math.random() * 3) : 1;
-  return (shock * m.vol * 0.35 + m.trend * m.vol * 0.15) * spike;
-}
+   Realistischeres Kursmodell (statt eines reinen Random Walks, der unbegrenzt
+   abdriften kann):
+   1. Mean Reversion: Der Kurs wird im Log-Raum zu einem "fairen Wert" (Anker)
+      zurückgezogen. Je weiter er sich entfernt, desto stärker der Rückzug –
+      dadurch gibt es kein endloses Abrutschen oder Davonlaufen.
+   2. Der Anker bewegt sich selbst langsam (wie Fundamentaldaten) und bleibt in
+      einem Korridor um den Basiswert.
+   3. Nachrichten-Ereignisse: seltene Kurssprünge (teils stark) mit kurzer Phase
+      erhöhter Volatilität, die wieder abklingt (Volatilitäts-Cluster).
+      Danach setzt eine Teil-Erholung ein.
+   4. Gemeinsame Marktfaktoren: Gesamtmarkt + je Kategorie (Krypto mit Krypto,
+      Aktien mit Aktien ...), Gold leicht gegenläufig.
+   5. Fat Tails: gelegentlich überproportional große Einzelbewegungen. */
 
-function updateTrend(m) {
-  if (Math.random() < 0.12) {
-    m.trend = clamp(m.trend + (Math.random() - 0.5) * 0.7, -1, 1);
-  } else {
-    m.trend *= 0.96;
-  }
-}
-
-function clampPrice(m, price) {
-  return clamp(price, m.base * 0.05, m.base * 20);
-}
-
-function initMarket(def) {
-  const m = {
+function createMarketState(def) {
+  // Ornstein-Uhlenbeck: Std der Abweichung = vol / sqrt(2 * kappa)  =>  kappa = vol² / (2 * devStd²)
+  const kappa = (def.vol * def.vol) / (2 * def.devStd * def.devStd);
+  return {
     base: def.price,
     vol: def.vol,
+    cat: def.category,
+    beta: def.corr,
+    catLoad: CATEGORY_LOADING[def.category],
+    range: def.range,
+    jumpSize: def.jumpSize,
+    jumpProb: 1 / 1500,          // ca. alle 25 Minuten ein Nachrichten-Ereignis pro Markt
+    kappa,
+    anchor: def.price,
+    anchorSigma: def.vol * 0.25,
+    burst: 0,
     trend: (Math.random() - 0.5) * 0.6,
     time: Date.now() - SEED_CANDLES * 60000,
     candles: [],
     cur: null,
     ticks: 0,
   };
+}
 
+/* Gemeinsame Zufallsfaktoren eines Ticks: ein Gesamtmarkt-Faktor plus ein Faktor je Kategorie */
+function drawFactors() {
+  return { global: randNorm(), crypto: randNorm(), stock: randNorm(), commodity: randNorm(), index: randNorm(), fx: randNorm() };
+}
+
+function clampPrice(m, price) {
+  const lim = m.range * 1.5;   // harte Sicherheitsgrenze (wird praktisch nie erreicht)
+  return clamp(price, m.base * Math.exp(-lim), m.base * Math.exp(lim));
+}
+
+function stepMarketPrice(m, price, factors) {
+  // Zufallsschock = Mix aus Gesamtmarkt-Faktor, Kategorie-Faktor und marktspezifischem Anteil
+  const idioW = Math.sqrt(Math.max(0.05, 1 - m.beta * m.beta - m.catLoad * m.catLoad));
+  let eps = m.beta * factors.global + m.catLoad * factors[m.cat] + idioW * randNorm();
+  if (Math.random() < 0.02) eps *= 1.8;                 // Fat Tail
+
+  // Nachrichten-Ereignis: Sprung + kurzzeitig erhöhte Volatilität + Trend-Impuls
+  let jump = 0;
+  if (Math.random() < m.jumpProb) {
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    const big = Math.random() < 0.06 ? 2.5 : 1;         // selten: richtig starkes Ereignis
+    jump = dir * m.jumpSize * (0.5 + Math.random()) * big;
+    m.burst = Math.min(m.burst + 1 + Math.random() * 1.5, 4);
+    m.trend = clamp(m.trend + dir * 0.4, -1, 1);
+  }
+
+  const sigma = m.vol * (1 + m.burst);
+  m.burst *= 0.992;                                      // Volatilität klingt ab
+
+  // Mean Reversion zum fairen Wert (nichtlinear: je weiter weg, desto stärker)
+  const x = Math.log(price / m.anchor);
+  const pull = m.kappa * x * (1 + 6 * Math.abs(x) / m.range);
+
+  // Fairer Wert driftet langsam, bleibt aber im Korridor um den Basiswert
+  const logA = Math.log(m.anchor / m.base);
+  const newLogA = clamp(logA * (1 - 0.00001) + m.anchorSigma * randNorm(), -m.range, m.range);
+  m.anchor = m.base * Math.exp(newLogA);
+
+  const ret = sigma * eps + sigma * m.trend * 0.12 - pull + jump;
+  return clampPrice(m, price * Math.exp(ret));
+}
+
+function updateTrend(m) {
+  if (Math.random() < 0.08) {
+    m.trend = clamp(m.trend + (Math.random() - 0.5) * 0.8, -1, 1);
+  } else {
+    m.trend *= 0.97;
+  }
+}
+
+function roundPx(v) { return Number(v.toPrecision(9)); }   // spart Speicherplatz in localStorage
+
+function roundCandle(c) {
+  return { o: roundPx(c.o), h: roundPx(c.h), l: roundPx(c.l), c: roundPx(c.c), t: c.t };
+}
+
+function initMarket(def, commonSeries) {
+  const m = createMarketState(def);
   let cur = { o: def.price, h: def.price, l: def.price, c: def.price, t: m.time };
+  let idx = 0;
 
   for (let i = 0; i < SEED_CANDLES; i++) {
     for (let k = 0; k < TICKS_PER_CANDLE; k++) {
-      const move = priceStep(m);
-      cur.c = clampPrice(m, cur.c * (1 + move));
+      const factors = commonSeries ? commonSeries[idx] : drawFactors();
+      idx++;
+      cur.c = stepMarketPrice(m, cur.c, factors);
       if (cur.c > cur.h) cur.h = cur.c;
       if (cur.c < cur.l) cur.l = cur.c;
     }
-    m.candles.push({ o: cur.o, h: cur.h, l: cur.l, c: cur.c, t: cur.t });
+    m.candles.push(roundCandle(cur));
     updateTrend(m);
     m.time += 60000;
-    const lastClose = cur.c;
-    cur = { o: lastClose, h: lastClose, l: lastClose, c: lastClose, t: m.time };
+    cur = { o: cur.c, h: cur.c, l: cur.c, c: cur.c, t: m.time };
   }
 
   m.cur = cur;
@@ -1283,18 +1377,17 @@ function initMarket(def) {
 }
 
 function commitCandle(m) {
-  m.candles.push({ o: m.cur.o, h: m.cur.h, l: m.cur.l, c: m.cur.c, t: m.cur.t });
+  m.candles.push(roundCandle(m.cur));
   if (m.candles.length > MAX_CANDLES) m.candles.shift();
   updateTrend(m);
   m.time += 60000;
-  const lastClose = m.candles[m.candles.length - 1].c;
+  const lastClose = m.cur.c;
   m.cur = { o: lastClose, h: lastClose, l: lastClose, c: lastClose, t: m.time };
   m.ticks = 0;
 }
 
-function microTick(m) {
-  const move = priceStep(m);
-  const newClose = clampPrice(m, m.cur.c * (1 + move));
+function microTick(m, factors) {
+  const newClose = stepMarketPrice(m, m.cur.c, factors);
   m.cur.c = newClose;
   if (newClose > m.cur.h) m.cur.h = newClose;
   if (newClose < m.cur.l) m.cur.l = newClose;
@@ -1330,9 +1423,16 @@ function marketChangePct(m) {
 /* ============================ PERSISTENZ ============================ */
 
 function freshMarkets() {
+  // gemeinsame Marktschocks für die Anfangshistorie, damit auch die History korreliert ist
+  const common = Array.from({ length: SEED_CANDLES * TICKS_PER_CANDLE }, () => drawFactors());
   const m = {};
-  MARKETS.forEach(def => { m[def.id] = initMarket(def); });
+  MARKETS.forEach(def => { m[def.id] = initMarket(def, common); });
   return m;
+}
+
+function isValidMarket(m) {
+  return !!m && Array.isArray(m.candles) && !!m.cur && isFinite(m.cur.c)
+      && typeof m.anchor === "number" && typeof m.kappa === "number" && typeof m.cat === "string";
 }
 
 function loadMarkets() {
@@ -1342,8 +1442,7 @@ function loadMarkets() {
       const parsed = JSON.parse(raw);
       markets = parsed && typeof parsed === "object" ? parsed : {};
       MARKETS.forEach(def => {
-        const m = markets[def.id];
-        if (!m || !Array.isArray(m.candles) || !m.cur) markets[def.id] = initMarket(def);
+        if (!isValidMarket(markets[def.id])) markets[def.id] = initMarket(def);
       });
       return;
     } catch (e) {
@@ -1394,7 +1493,8 @@ function saveSession() {
   else localStorage.removeItem(STORAGE_SESSION);
 }
 
-/* Best-effort-Migration aus der Vorversion ohne Login (falls vorhanden) */
+/* Best-effort-Migration aus der Vorversion ohne Login (falls vorhanden).
+   Offene Positionen aus der alten Kurswelt werden zum Einsatz erstattet. */
 function migrateOldStateIfNeeded() {
   if (Object.keys(profiles).length > 0) return;
   const raw = localStorage.getItem(STORAGE_OLD_V1);
@@ -1402,24 +1502,48 @@ function migrateOldStateIfNeeded() {
   try {
     const old = JSON.parse(raw);
     const uname = "spieler1";
+    let cash = typeof old.cash === "number" && isFinite(old.cash) ? old.cash : STARTING_CASH;
+    if (Array.isArray(old.positions)) {
+      old.positions.forEach(p => { if (p && isFinite(p.margin)) cash += p.margin; });
+    }
     profiles[uname] = {
       username: uname,
       displayName: "Spieler1",
       passwordHash: hashPassword(""),
       createdAt: Date.now(),
-      cash: typeof old.cash === "number" && isFinite(old.cash) ? old.cash : STARTING_CASH,
-      positions: Array.isArray(old.positions) ? old.positions.map(p => ({ tp: null, sl: null, ...p })) : [],
+      cash,
+      positions: [],
       history: Array.isArray(old.history) ? old.history.map(h => ({ ...h, type: "trade" })) : [],
     };
-    if (old.markets && typeof old.markets === "object") {
-      markets = old.markets;
-      MARKETS.forEach(def => { if (!markets[def.id]) markets[def.id] = initMarket(def); });
-    }
     saveProfiles();
-    saveMarkets();
   } catch (e) {
     console.warn("Migration der alten Daten fehlgeschlagen (nicht kritisch):", e);
   }
+}
+
+/* Das Kursmodell wurde überarbeitet (realistischer, mehr Märkte). Die alten
+   Kursdaten (v2) passen nicht mehr zu offenen Positionen – diese werden daher
+   einmalig zum eingesetzten Betrag erstattet und in der Historie vermerkt. */
+function migrateToMarketModelV3() {
+  if (localStorage.getItem(STORAGE_MARKETS) !== null) return;
+  if (localStorage.getItem(STORAGE_MARKETS_V2) === null) return;
+
+  let changed = false;
+  Object.values(profiles).forEach(p => {
+    if (p.positions.length) {
+      p.positions.forEach(pos => { p.cash += pos.margin; });
+      p.positions = [];
+      p.history.unshift({
+        type: "info",
+        closeTime: Date.now(),
+        note: "Kursmodell aktualisiert – offene Positionen wurden zum eingesetzten Betrag erstattet",
+      });
+      if (p.history.length > 300) p.history.length = 300;
+      changed = true;
+    }
+  });
+  if (changed) saveProfiles();
+  localStorage.removeItem(STORAGE_MARKETS_V2);
 }
 
 /* ============================== AUTH ============================== */
@@ -1964,8 +2088,9 @@ function renderHistoryTable(tbody, history) {
     return;
   }
   tbody.innerHTML = history.map(h => {
-    if (h.type === "reset") {
-      return `<tr class="reset-row"><td>${fmtDateTime(h.closeTime)}</td><td colspan="7">🔄 ${escapeHtml(h.note)}</td></tr>`;
+    if (h.type === "reset" || h.type === "info") {
+      const icon = h.type === "reset" ? "🔄" : "ℹ️";
+      return `<tr class="reset-row"><td>${fmtDateTime(h.closeTime)}</td><td colspan="7">${icon} ${escapeHtml(h.note)}</td></tr>`;
     }
     const def = marketDef(h.marketId);
     const pnlClass = h.pnl >= 0 ? "text-green" : "text-red";
@@ -2163,20 +2288,24 @@ function buildSidebarNav() {
     </button>
     <button class="nav-item" data-view="leaderboard">
       <span class="nav-icon">🏆</span><span class="nav-label">Rangliste</span>
-    </button>
-    <div class="nav-section-title">Märkte</div>`;
-
-  MARKETS.forEach(def => {
-    html += `<button class="nav-item" data-view="${def.id}">
-      <div class="nav-item-top">
-        <span class="nav-label">${def.name}</span>
-        <span class="nav-price" data-price-for="${def.id}">--</span>
-      </div>
-      <div class="nav-item-bottom">
-        <span class="nav-symbol">${def.symbol}</span>
-        <span class="nav-change" data-change-for="${def.id}">--</span>
-      </div>
     </button>`;
+
+  CATEGORY_ORDER.forEach(cat => {
+    const list = MARKETS.filter(d => d.category === cat);
+    if (!list.length) return;
+    html += `<div class="nav-section-title">${CATEGORY_LABELS[cat]}</div>`;
+    list.forEach(def => {
+      html += `<button class="nav-item" data-view="${def.id}">
+        <div class="nav-item-top">
+          <span class="nav-label">${def.name}</span>
+          <span class="nav-price" data-price-for="${def.id}">--</span>
+        </div>
+        <div class="nav-item-bottom">
+          <span class="nav-symbol">${def.symbol}</span>
+          <span class="nav-change" data-change-for="${def.id}">--</span>
+        </div>
+      </button>`;
+    });
   });
 
   navList.innerHTML = html;
@@ -2264,7 +2393,8 @@ function performReset() {
 /* ============================== HAUPT-TICK ============================== */
 
 function tick() {
-  MARKETS.forEach(def => microTick(markets[def.id]));
+  const factors = drawFactors();   // gemeinsame Marktfaktoren dieses Ticks
+  MARKETS.forEach(def => microTick(markets[def.id], factors));
   checkAutoClosesAllProfiles();
   renderLivePrices();
 
@@ -2406,9 +2536,10 @@ function attachEventListeners() {
 /* ============================== INITIALISIERUNG ============================== */
 
 function init() {
-  loadMarkets();
   loadProfiles();
   migrateOldStateIfNeeded();
+  migrateToMarketModelV3();
+  loadMarkets();
   loadSession();
 
   buildSidebarNav();
