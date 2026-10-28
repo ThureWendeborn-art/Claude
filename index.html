@@ -2560,5 +2560,270 @@ function init() {
 document.addEventListener("DOMContentLoaded", init);
 
 </script>
+  <skript>
+    /* =========================================================================
+   TradeSim – Erweiterung: Startmenü + Rugpull-Modus (Meme-Coins)
+   Einbinden: <script src="rugpull.js"></script> direkt VOR </body>,
+   also NACH dem bestehenden Haupt-<script>. Der Rest der Seite bleibt unverändert.
+   Nutzt Guthaben, Profile, Rangliste und Toasts der bestehenden App.
+   Reine Simulation, kein echtes Geld.
+   ========================================================================= */
+(function () {
+"use strict";
+
+var KEY = "tradesim_rp_coins_v1";
+var ACTIVE = 4;          // so viele Coins sind gleichzeitig handelbar
+var HIST = 90;           // Länge des Mini-Charts
+var coins = [], grave = [], rpTick = 0, shown = false, structSig = "", holdSig = "";
+var W1 = ["Moon","Pepe","Doge","Shiba","Elon","Rocket","Banana","Chad","Wojak","Turbo","Giga","Sigma","Frog","Lambo"];
+var W2 = ["Coin","Inu","Cash","AI","Token","X","Moon"];
+var g = function (id) { return document.getElementById(id); };
+var rnd = function (a, b) { return a + Math.random() * (b - a); };
+
+/* ---------- Coins ---------- */
+function newCoin() {
+  var name, tries = 0;
+  do {
+    name = W1[Math.floor(Math.random() * W1.length)] + W2[Math.floor(Math.random() * W2.length)];
+  } while (coins.some(function (c) { return c && c.name === name; }) && ++tries < 20);
+  var p = rnd(0.0002, 0.04);
+  return { id: uid(), name: name, sym: name.toUpperCase().slice(0, 5), price: p, start: p, peak: p,
+           age: 0, drift: rnd(0.004, 0.016), hist: [p], dead: false, deadTicks: 0 };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify({ coins: coins, grave: grave })); } catch (e) {} }
+function load() {
+  try {
+    var d = JSON.parse(localStorage.getItem(KEY));
+    if (d && Array.isArray(d.coins) && d.coins.length) { coins = d.coins; grave = d.grave || []; }
+  } catch (e) {}
+  while (coins.length < ACTIVE) coins.push(newCoin());
+}
+function dec(p) { return p < 0.0001 ? 9 : p < 0.01 ? 6 : 4; }
+function hold(p) { if (!Array.isArray(p.rp)) p.rp = []; return p.rp; }
+function coinById(id) { return coins.filter(function (c) { return c.id === id; })[0]; }
+function holdValue(h) { var c = coinById(h.coinId); return c && !c.dead ? h.units * c.price : 0; }
+
+/* ---------- Anbindung an Gesamtguthaben und Rangliste ---------- */
+var _tot = window.computeProfileTotal;
+window.computeProfileTotal = function (p) {
+  return _tot(p) + hold(p).reduce(function (s, h) { return s + holdValue(h); }, 0);
+};
+var _life = window.computeLifetimePnl;
+window.computeLifetimePnl = function (p) {
+  return _life(p) + p.history.reduce(function (s, h) { return s + (h.rpPnl || 0); }, 0);
+};
+
+function log(p, pnl, note) {
+  p.history.unshift({ type: "info", closeTime: Date.now(), rpPnl: pnl, note: note });
+  if (p.history.length > 300) p.history.length = 300;
+}
+
+/* ---------- Kursmodell: schneller Anstieg, zufälliger Crash ---------- */
+function crash(c) {
+  c.dead = true; c.deadTicks = 0;
+  c.price = c.price * rnd(0.002, 0.03);
+  c.hist.push(c.price);
+  Object.keys(profiles).forEach(function (k) {
+    var p = profiles[k], hs = hold(p);
+    for (var i = hs.length - 1; i >= 0; i--) {
+      if (hs[i].coinId !== c.id) continue;
+      var h = hs.splice(i, 1)[0];
+      log(p, -h.invested, "Rugpull: " + c.name + " wurde gerugt – Einsatz " + fmtMoney(h.invested) + " verloren");
+      if (k === session) toast("💀 " + c.name + " wurde gerugt! Verlust " + fmtMoney(h.invested), "error");
+    }
+  });
+  grave.unshift({ name: c.name, age: c.age, mult: c.peak / c.start });
+  if (grave.length > 6) grave.length = 6;
+  saveProfiles(); save();
+}
+
+function tick() {
+  coins.forEach(function (c, i) {
+    if (c.dead) {
+      if (++c.deadTicks >= 5) { coins[i] = newCoin(); }   // neuer Coin nach dem Crash
+      return;
+    }
+    c.age++;
+    var hazard = Math.min(0.03, 0.002 + 0.00008 * c.age);  // steigt mit dem Alter
+    if (Math.random() < hazard) { crash(c); return; }
+    var r = c.drift + 0.025 * randNorm();
+    if (Math.random() < 0.03) r += rnd(0.06, 0.15);         // Pump
+    c.price *= Math.exp(r);
+    if (c.price > c.peak) c.peak = c.price;
+    c.hist.push(c.price);
+    if (c.hist.length > HIST) c.hist.shift();
+  });
+  if (++rpTick % 10 === 0) save();
+  if (shown) render();
+}
+
+/* ---------- Aktionen ---------- */
+function buy(id) {
+  var p = activeProfile(), c = coinById(id), amt = parseFloat(g("rpAmt").value);
+  if (!p || !c) return;
+  if (c.dead) { toast("Dieser Coin ist gerugt und nicht mehr handelbar.", "error"); return; }
+  if (!(amt > 0)) { toast("Bitte einen Einsatz eingeben.", "error"); return; }
+  if (amt > p.cash + 0.0001) { toast("Nicht genügend verfügbares Guthaben.", "error"); return; }
+  var h = hold(p).filter(function (x) { return x.coinId === id; })[0];
+  if (!h) { h = { coinId: id, name: c.name, invested: 0, units: 0 }; hold(p).push(h); }
+  p.cash -= amt; h.invested += amt; h.units += amt / c.price;
+  saveProfiles();
+  toast("Gekauft: " + c.name + " für " + fmtMoney(amt), "success");
+  render(true);
+}
+function sell(id) {
+  var p = activeProfile(); if (!p) return;
+  var hs = hold(p), i = hs.map(function (x) { return x.coinId; }).indexOf(id);
+  if (i < 0) return;
+  var h = hs[i], v = holdValue(h), pnl = v - h.invested;
+  hs.splice(i, 1); p.cash += v;
+  log(p, pnl, "Rugpull-Modus: " + h.name + " verkauft · " + (pnl >= 0 ? "+" : "") + fmtMoney(pnl));
+  saveProfiles();
+  toast("Verkauft: " + h.name + " · " + (pnl >= 0 ? "+" : "") + fmtMoney(pnl), pnl >= 0 ? "success" : "error");
+  render(true);
+}
+
+/* ---------- Rendering ---------- */
+function spark(cv, c) {
+  var d = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  cv.width = w * d; cv.height = h * d;
+  var x = cv.getContext("2d"); x.setTransform(d, 0, 0, d, 0, 0);
+  var a = c.hist, mx = Math.max.apply(null, a), mn = Math.min.apply(null, a);
+  if (mx === mn) mx = mn + 1e-12;
+  x.strokeStyle = c.dead || a[a.length - 1] < a[0] ? "#ef4444" : "#22c55e"; x.lineWidth = 2; x.beginPath();
+  a.forEach(function (v, i) {
+    var px = i / Math.max(1, HIST - 1) * w, py = 4 + (1 - (v - mn) / (mx - mn)) * (h - 8);
+    i ? x.lineTo(px, py) : x.moveTo(px, py);
+  });
+  x.stroke();
+}
+function cardHtml(c) {
+  return '<div class="rp-card' + (c.dead ? " dead" : "") + '" data-id="' + c.id + '">' +
+    '<div class="rp-top"><b>' + c.name + '</b><span class="rp-sym">' + c.sym + '</span></div>' +
+    '<div class="rp-price"><span class="rp-pr"></span> €</div><div class="rp-mx"></div>' +
+    '<canvas class="rp-cv"></canvas>' +
+    (c.dead ? '<div class="rp-dead">💀 GERUGT – Liquidität weg</div>'
+            : '<button class="btn-primary rp-buy" data-id="' + c.id + '">Kaufen</button>') + '</div>';
+}
+function render(force) {
+  var p = activeProfile(); if (!p) return;
+  var sig = coins.map(function (c) { return c.id + (c.dead ? "d" : ""); }).join();
+  if (sig !== structSig || force === "all") { structSig = sig; g("rpCoins").innerHTML = coins.map(cardHtml).join(""); }
+  coins.forEach(function (c) {
+    var el = g("rpCoins").querySelector('[data-id="' + c.id + '"]'); if (!el) return;
+    var m = c.price / c.start;
+    el.querySelector(".rp-pr").textContent = fmtPrice(c.price, dec(c.price));
+    var mx = el.querySelector(".rp-mx");
+    mx.textContent = (m >= 1 ? "▲ " : "▼ ") + "x" + m.toFixed(2) + " seit Launch · " + c.age + " s alt";
+    mx.className = "rp-mx " + (m >= 1 ? "text-green" : "text-red");
+    spark(el.querySelector(".rp-cv"), c);
+  });
+  /* Portfolio: nur neu aufbauen, wenn sich die Positionen ändern (damit Klicks nicht verloren gehen) */
+  var hs = hold(p), hsig = hs.map(function (h) { return h.coinId + ":" + h.units; }).join();
+  if (hsig !== holdSig || force) {
+    holdSig = hsig;
+    g("rpHold").innerHTML = hs.length ? hs.map(function (h) {
+      return '<tr data-h="' + h.coinId + '"><td>' + h.name + '</td><td>' + fmtMoney(h.invested) +
+        '</td><td class="hv"></td><td class="hp"></td><td><button class="btn-close-pos rp-sell" data-id="' + h.coinId + '">Verkaufen</button></td></tr>';
+    }).join("") : '<tr class="empty-row"><td colspan="5">Keine Meme-Coins im Besitz</td></tr>';
+  }
+  hs.forEach(function (h) {
+    var row = g("rpHold").querySelector('[data-h="' + h.coinId + '"]'); if (!row) return;
+    var v = holdValue(h), pnl = v - h.invested;
+    row.querySelector(".hv").textContent = fmtMoney(v);
+    var hp = row.querySelector(".hp");
+    hp.textContent = (pnl >= 0 ? "+" : "") + fmtMoney(pnl); hp.className = "hp " + (pnl >= 0 ? "text-green" : "text-red");
+  });
+  g("rpGrave").textContent = grave.length ? grave.map(function (z) {
+    return "💀 " + z.name + " (Peak x" + z.mult.toFixed(1) + ", nach " + z.age + " s)";
+  }).join("   ") : "Noch kein Coin gerugt.";
+  g("rpCash").textContent = fmtMoney(p.cash);
+  g("rpTotal").textContent = fmtMoney(window.computeProfileTotal(p));
+  if (typeof renderLivePrices === "function") renderLivePrices();
+}
+
+/* ---------- Navigation: Startmenü / Trading / Rugpull ---------- */
+function showMenu() { g("menuOverlay").style.display = "flex"; g("rpApp").style.display = "none"; shown = false; }
+function goTrading() { g("menuOverlay").style.display = "none"; g("rpApp").style.display = "none"; shown = false; }
+function goRug() { g("menuOverlay").style.display = "none"; g("rpApp").style.display = "block"; shown = true; render("all"); }
+
+function build() {
+  var css = document.createElement("style");
+  css.textContent =
+    "#menuOverlay{position:fixed;inset:0;z-index:250;background:var(--bg);display:none;align-items:center;justify-content:center;flex-direction:column;gap:22px;padding:20px;overflow:auto}" +
+    "#menuOverlay h1{font-size:30px}.menu-sub{color:var(--text-dim);text-align:center}" +
+    ".menu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;width:100%;max-width:640px}" +
+    ".menu-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:26px 20px;text-align:left;transition:border-color .15s,background .15s}" +
+    ".menu-card:hover{background:var(--bg-hover);border-color:var(--accent)}.menu-card:focus-visible,.rp-card button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}" +
+    ".menu-card .mi{font-size:32px;display:block;margin-bottom:10px}.menu-card b{font-size:18px;display:block;margin-bottom:6px}.menu-card span.d{color:var(--text-dim);font-size:13px;line-height:1.5}" +
+    "#rpApp{position:fixed;inset:0;z-index:150;background:var(--bg);overflow-y:auto;display:none}" +
+    ".rp-bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 20px;background:rgba(10,13,19,.92);border-bottom:1px solid var(--border)}" +
+    ".rp-bar h2{font-size:18px}.rp-bar .sp{flex:1}.rp-wrap{max-width:1100px;margin:0 auto;padding:20px}" +
+    ".rp-bal{display:flex;flex-direction:column;align-items:flex-end;background:var(--bg-elevated);border:1px solid var(--border);padding:5px 12px;border-radius:10px;font-size:13px}.rp-bal small{color:var(--text-faint);font-size:10px}" +
+    ".rp-stake{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}.rp-stake input{width:140px;background:var(--bg-elevated);border:1px solid var(--border);padding:10px 12px;border-radius:10px;font-size:15px;font-weight:600}" +
+    ".rp-stake button{padding:9px 12px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border);font-size:12.5px;font-weight:600}" +
+    "#rpCoins{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:18px}" +
+    ".rp-card{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:14px}.rp-card.dead{border-color:var(--red);background:#1a0f14}" +
+    ".rp-top{display:flex;justify-content:space-between;align-items:baseline}.rp-sym{color:var(--text-faint);font-size:12px}.rp-price{font-size:20px;font-weight:700;margin:6px 0 2px;font-variant-numeric:tabular-nums}.rp-mx{font-size:12px;font-weight:600}" +
+    ".rp-cv{width:100%;height:70px;display:block;margin:8px 0}.rp-dead{color:var(--red);font-weight:700;text-align:center;padding:10px 0}.rp-buy{margin-top:4px;padding:10px 0}" +
+    "#rpGrave{color:var(--text-dim);font-size:13px;line-height:1.8}";
+  document.head.appendChild(css);
+
+  var box = document.createElement("div");
+  box.innerHTML =
+    '<div id="menuOverlay"><h1>📈 TradeSim</h1><p class="menu-sub">Wähle deinen Modus · Simulation, kein echtes Geld</p>' +
+    '<div class="menu-grid"><button class="menu-card" id="goTrading"><span class="mi">📈</span><b>Trading</b><span class="d">Krypto, Aktien, Rohstoffe, Indizes und Forex mit Hebel, Take-Profit und Stop-Loss.</span></button>' +
+    '<button class="menu-card" id="goRug"><span class="mi">🐸</span><b>Rugpull</b><span class="d">Investiere in Meme-Coins, die schnell steigen, aber jederzeit gerugt werden können. Dann ist dein Einsatz weg und ein neuer Coin startet.</span></button></div>' +
+    '<button class="btn-secondary" id="menuLogout">Abmelden</button></div>' +
+    '<div id="rpApp"><div class="rp-bar"><h2>🐸 Rugpull-Modus</h2><span class="demo-tag">SIMULATION – KEIN ECHTES GELD</span><span class="sp"></span>' +
+    '<div class="rp-bal"><small>Verfügbar</small><b id="rpCash">–</b></div><div class="rp-bal"><small>Gesamt</small><b id="rpTotal">–</b></div>' +
+    '<button class="btn-secondary" id="rpMenu">Hauptmenü</button></div>' +
+    '<div class="rp-wrap"><div class="rp-stake"><label class="field-label" style="margin:0">Einsatz (€)</label><input type="number" id="rpAmt" min="0.01" step="0.01" placeholder="z. B. 10" autocomplete="off">' +
+    '<button data-pct="0.1">10%</button><button data-pct="0.25">25%</button><button data-pct="0.5">50%</button><button data-pct="1">Max</button></div>' +
+    '<div id="rpCoins"></div>' +
+    '<div class="card"><h3>Deine Meme-Coins</h3><div class="table-wrap"><table><thead><tr><th>Coin</th><th>Investiert</th><th>Wert</th><th>G/V</th><th></th></tr></thead><tbody id="rpHold"></tbody></table></div></div>' +
+    '<div class="card"><h3>Zuletzt gerugt</h3><div id="rpGrave"></div></div></div></div>';
+  while (box.firstChild) document.body.appendChild(box.firstChild);
+
+  var side = document.querySelector(".sidebar-footer"), rb = g("resetBtn");
+  var mb = document.createElement("button");
+  mb.className = "reset-btn"; mb.textContent = "🏠 Hauptmenü"; mb.id = "sideMenu";
+  if (side && rb) side.insertBefore(mb, rb);
+
+  g("goTrading").onclick = goTrading; g("goRug").onclick = goRug;
+  g("rpMenu").onclick = showMenu; mb.onclick = showMenu;
+  g("menuLogout").onclick = function () { g("menuOverlay").style.display = "none"; g("logoutBtn").click(); };
+  g("rpApp").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.classList.contains("rp-buy")) buy(b.dataset.id);
+    else if (b.classList.contains("rp-sell")) sell(b.dataset.id);
+    else if (b.dataset.pct) {
+      var p = activeProfile(), v = p ? Math.floor(p.cash * parseFloat(b.dataset.pct) * 100) / 100 : 0;
+      g("rpAmt").value = v > 0 ? v.toFixed(2) : "";
+    }
+  });
+}
+
+/* Nach Login immer das Startmenü zeigen (afterLogin wird in der App dynamisch aufgerufen) */
+var _al = window.afterLogin;
+window.afterLogin = function () { _al(); showMenu(); };
+
+/* Abmelden schließt Menü und Rugpull-Ansicht */
+document.addEventListener("click", function (e) {
+  if (e.target.id === "logoutBtn") { g("menuOverlay").style.display = "none"; g("rpApp").style.display = "none"; shown = false; }
+  /* Account-Reset räumt auch die Meme-Coin-Bestände ab (läuft vor dem App-Handler) */
+  if (e.target.id === "confirmResetBtn") { var p = activeProfile(); if (p) p.rp = []; holdSig = ""; }
+}, true);
+window.addEventListener("beforeunload", save);
+
+function init() {
+  build(); load();
+  if (activeProfile()) showMenu();
+  setInterval(tick, 1000);
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
+  </skript>
 </body>
 </html>
